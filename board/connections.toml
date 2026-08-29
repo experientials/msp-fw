@@ -1,0 +1,182 @@
+# MSP430FR2476 connection registry (bob-929) — single source of truth.
+#
+# Every signal wired to the MCU is listed here. Add ONE connection at a time:
+# set status = "active" only after the pin<->function pairing is verified against
+# the FR2476 datasheet port-function table (datasheets/msp430fr2476.pdf).
+#
+# Intended consumers (codegen/validation, added later):
+#   - diag/src/board.h        (C #defines)
+#   - board crate bsp_pins!   (Rust typestate pins)
+#   - a validator that checks each `function` is actually offered by `pin` on this chip
+#
+# Field vocabulary:
+#   status : active | planned | reserved
+#   dir    : in | out | bidir | analog
+#   sel    : primary pin-mux select for the function (SEL0 = primary module function)
+
+[chip]
+part      = "MSP430FR2476"
+package   = "RHB VQFN-40"          # confirm against the unit on the bench
+datasheet = "datasheets/msp430fr2476.pdf"
+
+# ---------------------------------------------------------------------------
+# ACTIVE — implemented in the diag firmware today (LEDs + backchannel)
+# ---------------------------------------------------------------------------
+
+[[connection]]
+id       = "i2c_sda"
+signal   = "Sensor/LED I2C SDA"
+pin      = "P1.2"
+function = "UCB0SDA"
+module   = "eUSCI_B0"
+sel      = "SEL0"
+dir      = "bidir"
+status   = "active"
+net      = "IS31FL3730 @0x61 (shared sensor bus)"
+notes    = "verified against datasheet pin table"
+
+[[connection]]
+id       = "i2c_scl"
+signal   = "Sensor/LED I2C SCL"
+pin      = "P1.3"
+function = "UCB0SCL"
+module   = "eUSCI_B0"
+sel      = "SEL0"
+dir      = "bidir"
+status   = "active"
+net      = "IS31FL3730 @0x61 (shared sensor bus)"
+notes    = "verified against datasheet pin table"
+
+[[connection]]
+id       = "is31_sdb"
+signal   = "IS31FL3730 SDB (shutdown, active-low)"
+pin      = "P2.5"
+function = "GPIO"
+module   = "PORT"
+sel      = "none"
+dir      = "out"
+status   = "active"
+net      = "IS31FL3730 SDB — drive HIGH to enable (examples/i2c-is31)"
+notes    = "Free header GPIO (UCA1RXD alt, unused). NOT P2.0 — that's crystal XOUT per slau802 fig 18. R3 (100k) pulls SDB LOW = shutdown by default (EB schematic Fig. 2), so driving HIGH is REQUIRED to enable the driver — must be wired P2.5 -> TP3 SDB."
+
+[[connection]]
+id       = "uart_tx"
+signal   = "Backchannel UART TX"
+pin      = "P1.4"
+function = "UCA0TXD"
+module   = "eUSCI_A0"
+sel      = "SEL0"
+dir      = "out"
+status   = "active"
+net      = "eZ-FET -> /dev/cu.usbmodem* (9600 8N1)"
+notes    = "verified against datasheet pin table"
+
+[[connection]]
+id       = "uart_rx"
+signal   = "Backchannel UART RX"
+pin      = "P1.5"
+function = "UCA0RXD"
+module   = "eUSCI_A0"
+sel      = "SEL0"
+dir      = "in"
+status   = "active"
+net      = "eZ-FET backchannel"
+notes    = "verified against datasheet pin table"
+
+# ---------------------------------------------------------------------------
+# PLANNED — product-intent signals from ../HARDWARE.md. Pins/functions marked
+# with '?' are NOT yet confirmed against the datasheet — do that before activating.
+# ---------------------------------------------------------------------------
+
+[[connection]]
+id       = "vsom_adc"
+signal   = "VSOM (LiPo) voltage sense"
+pin      = "P1.6"
+function = "A6?"                    # confirm ADC channel
+module   = "ADC"
+dir      = "analog"
+status   = "planned"
+net      = "LiPo battery (nRF52 side), 2.8-5.0 V"
+notes    = "HARDWARE.md: P1.6 -> VSOM"
+
+[[connection]]
+id       = "charge_adc"
+signal   = "CHARGE (VBUS) voltage sense"
+pin      = "P1.7"
+function = "A7?"                    # confirm ADC channel
+module   = "ADC"
+dir      = "analog"
+status   = "planned"
+net      = "VBUS (nRF52 side)"
+notes    = "HARDWARE.md: P1.7 -> CHARGE"
+
+[[connection]]
+id       = "stem_sda"
+signal   = "Stem I2C SDA"
+pin      = "P3.2?"                  # candidate UCB1SIMO/UCB1SDA
+function = "UCB1SDA?"
+module   = "eUSCI_B1"
+dir      = "bidir"
+status   = "planned"
+net      = "Stem bus to host/other MCUs"
+notes    = "second I2C so Stem is independent of the sensor bus; confirm pins"
+
+[[connection]]
+id       = "stem_scl"
+signal   = "Stem I2C SCL"
+pin      = "P3.6?"                  # candidate UCB1SOMI/UCB1SCL
+function = "UCB1SCL?"
+module   = "eUSCI_B1"
+dir      = "bidir"
+status   = "planned"
+net      = "Stem bus"
+notes    = "confirm pins against datasheet"
+
+[[connection]]
+id       = "stem_msg"
+signal   = "Stem MSG (1-Wire-over-UART)"
+pin      = "P5.1/P5.2?"
+function = "UCA0RXD/UCA0TXD"
+module   = "eUSCI_A0"
+dir      = "bidir"
+status   = "planned"
+net      = "shared 1-wire coordination line"
+conflict = "uart_tx,uart_rx"       # same eUSCI_A0 — mutually exclusive with the diag backchannel
+notes    = "product routes A0 to P5.1/P5.2; diag routes A0 to P1.4/P1.5. Only one at a time."
+
+[[connection]]
+id       = "sensor_int"
+signal   = "Sensor interrupt in"
+pin      = "TBD"
+function = "GPIO"
+module   = "PORT"
+dir      = "in"
+status   = "planned"
+net      = "sensor INT (e.g. APDS-9960 / IMU)"
+notes    = "assign a port pin with interrupt capability"
+
+# ---------------------------------------------------------------------------
+# RESERVED — programming/debug, not general I/O
+# ---------------------------------------------------------------------------
+
+[[connection]]
+id       = "msp_rst"
+signal   = "Reset / SBW"
+pin      = "RST/NMI/SBWTDIO"
+function = "RESET"
+module   = "SYS"
+dir      = "bidir"
+status   = "reserved"
+net      = "eZ-FET SBW"
+notes    = "do not repurpose"
+
+[[connection]]
+id       = "msp_test"
+signal   = "Test / SBW clock"
+pin      = "TEST/SBWTCK"
+function = "TEST"
+module   = "SYS"
+dir      = "in"
+status   = "reserved"
+net      = "eZ-FET SBW"
+notes    = "do not repurpose"

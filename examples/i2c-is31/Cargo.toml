@@ -1,0 +1,13 @@
+[package]
+name = "i2c-is31"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+msp430 = "0.4"
+msp430-rt = "0.4"
+panic-msp430 = "0.4"
+
+[profile.release]
+opt-level = "s"
+lto = true

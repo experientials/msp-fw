@@ -1,0 +1,15 @@
+[package]
+name = "diag"
+version = "0.1.0"
+edition = "2021"
+description = "bob-929 diagnostic firmware (Rust) for the MSP430FR2476"
+
+[dependencies]
+msp430 = "0.4"
+msp430-rt = "0.4"
+panic-msp430 = "0.4"
+msp430fr2476 = { path = "../pac/msp430fr2476" }
+
+[profile.release]
+opt-level = "s"
+lto = true

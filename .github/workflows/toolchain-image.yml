@@ -1,0 +1,34 @@
+name: toolchain-image
+
+# Build the combined MSP430 C+Rust toolchain image and push it to GHCR.
+# Runs when the Dockerfile changes (or on demand). firmware.yml consumes the
+# pushed image, so run this once (workflow_dispatch) before the first firmware run.
+on:
+  push:
+    paths:
+      - docker/**
+      - .github/workflows/toolchain-image.yml
+  workflow_dispatch:
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./docker
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/msp430-toolchain:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

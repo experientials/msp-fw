@@ -1,0 +1,33 @@
+name: firmware
+
+# Build-only CI: compile the C and Rust firmware in the pinned toolchain image
+# and upload the binaries. No hardware / flashing (that's local, via the
+# msp430-macos-dev skill's mspdebug wrapper).
+#
+# Requires the toolchain-image workflow to have pushed the image to GHCR first.
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest              # x86_64 runner → image runs native (no emulation)
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/msp430-toolchain:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (same just recipe as local dev)
+        run: just build          # inside the container → detects /.dockerenv → builds natively
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            examples/hello-c/build/*.elf
+            examples/hello-rust/target/msp430-none-elf/release/hello-rust
+          if-no-files-found: error
