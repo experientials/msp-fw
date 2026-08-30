@@ -1,0 +1,19 @@
+{
+  "eval_id": 0,
+  "eval_name": "flash-diag",
+  "prompt": "How do I build and flash the diag firmware to the FR2476 LaunchPad and watch its serial output? I'm on the Mac.",
+  "assertions": [
+    {
+      "text": "Recommends `just diag run` + `just monitor`"
+    },
+    {
+      "text": "Explains build-in-container / flash-on-host"
+    },
+    {
+      "text": "Points at TOOLCHAIN.md and/or the msp430-macos-dev flashing skill"
+    },
+    {
+      "text": "Does NOT invent a native msp430-gcc build on the Mac"
+    }
+  ]
+}

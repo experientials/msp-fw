@@ -1,0 +1,19 @@
+{
+  "eval_id": 2,
+  "eval_name": "which-mcu",
+  "prompt": "Which MSP430 should we design in for production, and firmware constraints before committing?",
+  "assertions": [
+    {
+      "text": "Recommends FR2433 as production default"
+    },
+    {
+      "text": "FR2476 only for battery/analog monitoring (+ supply-risk)"
+    },
+    {
+      "text": "Flags the ship-on-2433 port caveat (avoid FR2476-only features)"
+    },
+    {
+      "text": "Points at bob-929/docs/MCU_SELECTION.md"
+    }
+  ]
+}

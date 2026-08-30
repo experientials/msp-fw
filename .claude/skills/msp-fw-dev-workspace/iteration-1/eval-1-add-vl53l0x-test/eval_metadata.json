@@ -1,0 +1,22 @@
+{
+  "eval_id": 1,
+  "eval_name": "add-vl53l0x-test",
+  "prompt": "Add a diagnostic test for a VL53L0X ToF sensor (I2C 0x29) to the diag firmware. Just where the code goes and the conventions.",
+  "assertions": [
+    {
+      "text": "New src/<chip>.rs driver mirroring is31.rs"
+    },
+    {
+      "text": "Registered in diag.rs run(); mod declared in main.rs"
+    },
+    {
+      "text": "probe -> identify -> exercise, bounded/never-hang I2C"
+    },
+    {
+      "text": "Address/pins added to connections.toml"
+    },
+    {
+      "text": "References diag/DESIGN.md"
+    }
+  ]
+}

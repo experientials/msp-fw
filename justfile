@@ -26,6 +26,7 @@ mod check
 mod example
 mod pac
 mod diag
+mod usb
 
 default:
     @just --list
@@ -49,14 +50,21 @@ probe:
     DYLD_FALLBACK_LIBRARY_PATH={{libdir}} {{mspdebug}} tilib exit
 
 # watch the UART console (eZ-FET backchannel, 9600 8N1). Ctrl-C to stop.
-# One-way read (the firmware only prints) — plain `cat`, so no screen and no
-# detached sessions holding the port. If silent, try the other CDC port:
-#   just monitor /dev/cu.usbmodem23201
-monitor port="/dev/cu.usbmodem23203":
+# No arg = auto-pick the highest-numbered usbmodem (the eZ-FET backchannel; the numbers
+# change on every re-enumeration). If that one is silent, pass the other explicitly:
+#   just monitor /dev/cu.usbmodem23601
+# One-way read (firmware only prints) — plain `cat`, so no screen / detached port holders.
+monitor port="":
     #!/usr/bin/env bash
-    echo "monitoring {{port}} @9600 — Ctrl-C to stop"
-    stty -f "{{port}}" 9600 cs8 -cstopb -parenb raw -echo
-    exec cat "{{port}}"
+    set -euo pipefail
+    p="{{port}}"
+    if [ -z "$p" ]; then
+        p=$(ls -1 /dev/cu.usbmodem* 2>/dev/null | sort | tail -1)
+        [ -n "$p" ] || { echo "no /dev/cu.usbmodem* found — run 'just usb status'" >&2; exit 1; }
+    fi
+    echo "monitoring $p @9600 — Ctrl-C to stop"
+    stty -f "$p" 9600 cs8 -cstopb -parenb raw -echo
+    exec cat "$p"
 
 # remove all build artifacts
 clean:

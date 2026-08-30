@@ -16,8 +16,10 @@ use msp430_rt::entry;
 use msp430fr2476::Peripherals;
 
 mod diag;
+mod hal;
 mod i2c;
 mod is31;
+mod oled;
 mod regs;
 mod uart;
 mod util;

@@ -9,6 +9,12 @@ msp430 = "0.4"
 msp430-rt = "0.4"
 panic-msp430 = "0.4"
 msp430fr2476 = { path = "../pac/msp430fr2476" }
+# embedded-hal 1.0 = the trait layer our board HAL exposes; ssd1306/embedded-graphics are the
+# first *consumers* of it (the OLED status display). Kept here for the compile spike — if the
+# graphics crates don't build for msp430 (Tier-3, 16-bit), the shim survives on its own.
+embedded-hal = "1.0"
+ssd1306 = "0.9"
+embedded-graphics = "0.8"
 
 [profile.release]
 opt-level = "s"

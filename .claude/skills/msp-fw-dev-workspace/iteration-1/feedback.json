@@ -1,0 +1,10 @@
+{
+  "reviews": [
+    {
+      "run_id": "eval-0-flash-diag-with_skill",
+      "feedback": "Builds runs on Linux. For macOS and Windows it runs in Docker container. For CI it runs on a Linux node. For Raspberry Pi it runs native.\nComms over USB with the device runs in Host OS.\njust usb will check and advise resolution of USB issues.\n\nNo absolute paths, relative and URLs to GitHub static content.",
+      "timestamp": "2026-08-30T19:00:13.105Z"
+    }
+  ],
+  "status": "in_progress"
+}

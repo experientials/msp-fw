@@ -1,0 +1,82 @@
+[
+  {
+    "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+    "should_trigger": true
+  },
+  {
+    "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+    "should_trigger": true
+  },
+  {
+    "query": "the fr2476 PAC is missing a field on the ADC register i need. how do i regenerate the pac from the svd?",
+    "should_trigger": true
+  },
+  {
+    "query": "we're about to order the production batch and need to choose between the msp430fr2433 and fr2476 - any firmware constraints before we commit?",
+    "should_trigger": true
+  },
+  {
+    "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+    "should_trigger": true
+  },
+  {
+    "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+    "should_trigger": true
+  },
+  {
+    "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+    "should_trigger": true
+  },
+  {
+    "query": "setting up github actions CI for the msp-fw build - does it run in docker or native on the linux runner?",
+    "should_trigger": true
+  },
+  {
+    "query": "add an example under examples/ that toggles a gpio on the fr2433, in rust",
+    "should_trigger": true
+  },
+  {
+    "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+    "should_trigger": true
+  },
+  {
+    "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+    "should_trigger": false
+  },
+  {
+    "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+    "should_trigger": false
+  },
+  {
+    "query": "write a python script to parse the event-log CSV my ziloo exported and plot detections over time",
+    "should_trigger": false
+  },
+  {
+    "query": "design the 3d-printed enclosure and mounting bracket for the bob-929 camera module",
+    "should_trigger": false
+  },
+  {
+    "query": "how do i drive an ssd1306 oled over i2c from a raspberry pi using python and luma.oled?",
+    "should_trigger": false
+  },
+  {
+    "query": "explain how i2c 7-bit addressing and clock stretching work in general",
+    "should_trigger": false
+  },
+  {
+    "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+    "should_trigger": false
+  },
+  {
+    "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+    "should_trigger": false
+  },
+  {
+    "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+    "should_trigger": false
+  },
+  {
+    "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+    "should_trigger": false
+  }
+]

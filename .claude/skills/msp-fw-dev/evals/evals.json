@@ -1,0 +1,26 @@
+{
+  "skill_name": "msp-fw-dev",
+  "evals": [
+    {
+      "id": 0,
+      "name": "flash-diag",
+      "prompt": "How do I build and flash the diag firmware to the FR2476 LaunchPad and watch its serial output? I'm on the Mac.",
+      "expected_output": "Routes to the container-build / host-flash model: just diag run + just monitor, and points at TOOLCHAIN.md and the msp430-macos-dev flashing skill. Doesn't invent a native msp430-gcc build.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "add-vl53l0x-test",
+      "prompt": "Add a diagnostic test for a VL53L0X time-of-flight sensor (I2C, 0x29) to the diag firmware. I don't need a full implementation, just where the code goes and the conventions to follow.",
+      "expected_output": "Routes to diag/DESIGN.md extension contract (src/<chip>.rs driver + one line in TESTS registry, probe->identify->exercise, bounded/never-hang I2C), and connections.toml as the pin/address source of truth.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "which-mcu",
+      "prompt": "We're about to order a batch of boards. Which MSP430 should we design in for production, and are there firmware constraints I should know about before committing?",
+      "expected_output": "Surfaces FR2433 as production default / FR2476 for battery monitoring, the ship-on-2433 port caveat (avoid FR2476-only eCOMP/memory), and points at bob-929/docs/MCU_SELECTION.md.",
+      "files": []
+    }
+  ]
+}

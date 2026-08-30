@@ -1,0 +1,1545 @@
+Split: 12 train, 8 test (holdout=0.4)
+
+============================================================
+Iteration 1/5
+Description: Orientation and workflow for developing MSP430 firmware in the msp-fw repo — building/flashing via the Docker toolchain + `just`, generating/regenerating svd2rust PACs, writing and extending the Rust `diag` power-on self-test firmware, wiring signals through the `connections.toml` registry, and the product's high-level goals (multiple MSP430s as low-power supervisor / I/O-extender nodes; FR2433 as the default part, FR2476 where battery/rail monitoring is needed). Use this whenever working anywhere under `msp-fw/` — editing `diag/`, `pac/`, `board/`, `examples/`, the `justfile` or `docker/Dockerfile` — or when asked "how do I build/flash/test this", "add a sensor/device test", "regenerate the PAC", "which MCU or PAC do we target", "where's the pin map", or "what is this firmware even for". Be pushy about consulting it even for a one-line change: the repo has strong conventions (typed PAC register access, never-hang I²C, pins sourced from connections.toml, build-in-container/flash-on-host) that are easy to violate.
+============================================================
+Train: 18/36 correct, precision=100% recall=0% accuracy=50% (187.9s)
+  [FAIL] rate=0/3 expected=True: can you explain what the diag firmware does on boot and how 
+  [FAIL] rate=0/3 expected=True: how do bob-929, ziloo and this msp430 firmware relate - whic
+  [FAIL] rate=0/3 expected=True: just diag run fails with 'No unused FET found' and my /dev/c
+  [FAIL] rate=0/3 expected=True: where's the pin map for the msp430 supervisor? i need which 
+  [FAIL] rate=0/3 expected=True: how do I flash the diag firmware to my launchpad and watch t
+  [PASS] rate=0/3 expected=False: i'm writing firmware for an stm32f411 nucleo in rust with em
+  [FAIL] rate=0/3 expected=True: i want to add a diag test for the APDS-9960 gesture sensor (
+  [PASS] rate=0/3 expected=False: help me write the kickstarter campaign copy and pledge tiers
+  [PASS] rate=0/3 expected=False: generate an arduino sketch to read a vl53l0x distance sensor
+  [PASS] rate=0/3 expected=False: help me fix mspdebug on my mac - it prints 'library load dis
+  [PASS] rate=0/3 expected=False: what msp430 launchpad should i buy to start learning embedde
+  [PASS] rate=0/3 expected=False: review this elixir phoenix liveview module for the thepia fl
+Test : 12/24 correct, precision=100% recall=0% accuracy=50% (0.0s)
+  [FAIL] rate=0/3 expected=True: setting up github actions CI for the msp-fw build - does it 
+  [FAIL] rate=0/3 expected=True: we're about to order the production batch and need to choose
+  [FAIL] rate=0/3 expected=True: the fr2476 PAC is missing a field on the ADC register i need
+  [FAIL] rate=0/3 expected=True: add an example under examples/ that toggles a gpio on the fr
+  [PASS] rate=0/3 expected=False: design the 3d-printed enclosure and mounting bracket for the
+  [PASS] rate=0/3 expected=False: explain how i2c 7-bit addressing and clock stretching work i
+  [PASS] rate=0/3 expected=False: write a python script to parse the event-log CSV my ziloo ex
+  [PASS] rate=0/3 expected=False: how do i drive an ssd1306 oled over i2c from a raspberry pi 
+
+Improving description...
+Proposed (40.4s): Use when working on the msp-fw MSP430 firmware project — the Rust `diag` power-on self-test, the vendored svd2rust PACs, the `board/connections.toml` pin registry, or the `just`/Docker build-and-flash toolchain. Trigger for questions about: what the `diag` firmware does on boot and how it decides pass/fail; adding or extending a device/sensor diagnostic test and where its driver code goes; building, flashing, or monitoring serial output for this firmware (including `just diag run` failures, "No unused FET found", or a vanished usbmodem port); finding which MCU pin a signal (e.g. Stem I²C SDA) lands on; regenerating a PAC; or how this firmware relates to its sibling products (bob-929, ziloo) and their hardware. This is a specific project — do NOT trigger for generic MSP430 hobby/learning advice, buying a LaunchPad, other MCUs (STM32, Arduino), or standalone mspdebug/macOS-toolchain setup unrelated to this repo.
+
+============================================================
+Iteration 2/5
+Description: Use when working on the msp-fw MSP430 firmware project — the Rust `diag` power-on self-test, the vendored svd2rust PACs, the `board/connections.toml` pin registry, or the `just`/Docker build-and-flash toolchain. Trigger for questions about: what the `diag` firmware does on boot and how it decides pass/fail; adding or extending a device/sensor diagnostic test and where its driver code goes; building, flashing, or monitoring serial output for this firmware (including `just diag run` failures, "No unused FET found", or a vanished usbmodem port); finding which MCU pin a signal (e.g. Stem I²C SDA) lands on; regenerating a PAC; or how this firmware relates to its sibling products (bob-929, ziloo) and their hardware. This is a specific project — do NOT trigger for generic MSP430 hobby/learning advice, buying a LaunchPad, other MCUs (STM32, Arduino), or standalone mspdebug/macOS-toolchain setup unrelated to this repo.
+============================================================
+Train: 18/36 correct, precision=100% recall=0% accuracy=50% (186.3s)
+  [FAIL] rate=0/3 expected=True: can you explain what the diag firmware does on boot and how 
+  [FAIL] rate=0/3 expected=True: how do bob-929, ziloo and this msp430 firmware relate - whic
+  [FAIL] rate=0/3 expected=True: just diag run fails with 'No unused FET found' and my /dev/c
+  [FAIL] rate=0/3 expected=True: where's the pin map for the msp430 supervisor? i need which 
+  [FAIL] rate=0/3 expected=True: how do I flash the diag firmware to my launchpad and watch t
+  [FAIL] rate=0/3 expected=True: i want to add a diag test for the APDS-9960 gesture sensor (
+  [PASS] rate=0/3 expected=False: i'm writing firmware for an stm32f411 nucleo in rust with em
+  [PASS] rate=0/3 expected=False: help me fix mspdebug on my mac - it prints 'library load dis
+  [PASS] rate=0/3 expected=False: help me write the kickstarter campaign copy and pledge tiers
+  [PASS] rate=0/3 expected=False: generate an arduino sketch to read a vl53l0x distance sensor
+  [PASS] rate=0/3 expected=False: what msp430 launchpad should i buy to start learning embedde
+  [PASS] rate=0/3 expected=False: review this elixir phoenix liveview module for the thepia fl
+Test : 12/24 correct, precision=100% recall=0% accuracy=50% (0.0s)
+  [FAIL] rate=0/3 expected=True: setting up github actions CI for the msp-fw build - does it 
+  [FAIL] rate=0/3 expected=True: we're about to order the production batch and need to choose
+  [FAIL] rate=0/3 expected=True: the fr2476 PAC is missing a field on the ADC register i need
+  [FAIL] rate=0/3 expected=True: add an example under examples/ that toggles a gpio on the fr
+  [PASS] rate=0/3 expected=False: design the 3d-printed enclosure and mounting bracket for the
+  [PASS] rate=0/3 expected=False: write a python script to parse the event-log CSV my ziloo ex
+  [PASS] rate=0/3 expected=False: how do i drive an ssd1306 oled over i2c from a raspberry pi 
+  [PASS] rate=0/3 expected=False: explain how i2c 7-bit addressing and clock stretching work i
+
+Improving description...
+Proposed (45.8s): Use for any work on the `msp-fw` MSP430 firmware repo — its Rust `diag` power-on self-test, the vendored svd2rust PACs, the `board/connections.toml` pin/signal registry, and the `just`/Docker build-flash-monitor toolchain. Trigger whenever the user asks to: explain what `diag` does on boot or how it decides pass/fail; add or extend a device/sensor diagnostic test (e.g. an I²C chip like APDS-9960) and where its driver goes; build, flash, or monitor serial output for this firmware, including `just diag run` errors like "No unused FET found" or a vanished usbmodem port; find which MCU pin a signal lands on (Stem I²C SDA, supervisor pin map); regenerate a PAC; or how this firmware relates to sibling products bob-929 and ziloo. Prefer triggering when any project name appears (diag, connections.toml, Stem bus, bob-929, ziloo, FR2433/FR2476). Skip only generic MSP430 hobby/learning, LaunchPad-buying, or unrelated-MCU questions with no tie to this repo.
+
+============================================================
+Iteration 3/5
+Description: Use for any work on the `msp-fw` MSP430 firmware repo — its Rust `diag` power-on self-test, the vendored svd2rust PACs, the `board/connections.toml` pin/signal registry, and the `just`/Docker build-flash-monitor toolchain. Trigger whenever the user asks to: explain what `diag` does on boot or how it decides pass/fail; add or extend a device/sensor diagnostic test (e.g. an I²C chip like APDS-9960) and where its driver goes; build, flash, or monitor serial output for this firmware, including `just diag run` errors like "No unused FET found" or a vanished usbmodem port; find which MCU pin a signal lands on (Stem I²C SDA, supervisor pin map); regenerate a PAC; or how this firmware relates to sibling products bob-929 and ziloo. Prefer triggering when any project name appears (diag, connections.toml, Stem bus, bob-929, ziloo, FR2433/FR2476). Skip only generic MSP430 hobby/learning, LaunchPad-buying, or unrelated-MCU questions with no tie to this repo.
+============================================================
+Train: 18/36 correct, precision=100% recall=0% accuracy=50% (183.9s)
+  [FAIL] rate=0/3 expected=True: just diag run fails with 'No unused FET found' and my /dev/c
+  [FAIL] rate=0/3 expected=True: how do bob-929, ziloo and this msp430 firmware relate - whic
+  [FAIL] rate=0/3 expected=True: can you explain what the diag firmware does on boot and how 
+  [FAIL] rate=0/3 expected=True: where's the pin map for the msp430 supervisor? i need which 
+  [FAIL] rate=0/3 expected=True: i want to add a diag test for the APDS-9960 gesture sensor (
+  [FAIL] rate=0/3 expected=True: how do I flash the diag firmware to my launchpad and watch t
+  [PASS] rate=0/3 expected=False: i'm writing firmware for an stm32f411 nucleo in rust with em
+  [PASS] rate=0/3 expected=False: help me write the kickstarter campaign copy and pledge tiers
+  [PASS] rate=0/3 expected=False: generate an arduino sketch to read a vl53l0x distance sensor
+  [PASS] rate=0/3 expected=False: help me fix mspdebug on my mac - it prints 'library load dis
+  [PASS] rate=0/3 expected=False: what msp430 launchpad should i buy to start learning embedde
+  [PASS] rate=0/3 expected=False: review this elixir phoenix liveview module for the thepia fl
+Test : 12/24 correct, precision=100% recall=0% accuracy=50% (0.0s)
+  [FAIL] rate=0/3 expected=True: setting up github actions CI for the msp-fw build - does it 
+  [FAIL] rate=0/3 expected=True: we're about to order the production batch and need to choose
+  [FAIL] rate=0/3 expected=True: add an example under examples/ that toggles a gpio on the fr
+  [FAIL] rate=0/3 expected=True: the fr2476 PAC is missing a field on the ADC register i need
+  [PASS] rate=0/3 expected=False: design the 3d-printed enclosure and mounting bracket for the
+  [PASS] rate=0/3 expected=False: explain how i2c 7-bit addressing and clock stretching work i
+  [PASS] rate=0/3 expected=False: write a python script to parse the event-log CSV my ziloo ex
+  [PASS] rate=0/3 expected=False: how do i drive an ssd1306 oled over i2c from a raspberry pi 
+
+Improving description...
+Proposed (29.8s): Use when the user is working on **this specific MSP430 firmware project** (the `msp-fw` repo and its `diag` self-test, `connections.toml` pin registry, svd2rust PACs, and `just`/Docker toolchain) or its sibling products **bob-929** and **ziloo**. Trigger when they want to: understand or extend the `diag` power-on self-test (what it does on boot, pass/fail logic, adding a sensor/I²C device test like APDS-9960 and where the driver goes); build, flash, or monitor serial output for the firmware, or debug `just diag run` issues ("No unused FET found", a vanished usbmodem/cu port); look up which MCU pin a signal lands on (Stem I²C SDA, supervisor pin map); regenerate a PAC; or learn how the firmware relates to bob-929/ziloo. Named signals: diag, Stem bus, FR2433, FR2476. Do NOT trigger for generic MSP430 hobby/LaunchPad-buying questions, other MCUs (STM32, Arduino), or standalone mspdebug setup unrelated to this repo.
+
+============================================================
+Iteration 4/5
+Description: Use when the user is working on **this specific MSP430 firmware project** (the `msp-fw` repo and its `diag` self-test, `connections.toml` pin registry, svd2rust PACs, and `just`/Docker toolchain) or its sibling products **bob-929** and **ziloo**. Trigger when they want to: understand or extend the `diag` power-on self-test (what it does on boot, pass/fail logic, adding a sensor/I²C device test like APDS-9960 and where the driver goes); build, flash, or monitor serial output for the firmware, or debug `just diag run` issues ("No unused FET found", a vanished usbmodem/cu port); look up which MCU pin a signal lands on (Stem I²C SDA, supervisor pin map); regenerate a PAC; or learn how the firmware relates to bob-929/ziloo. Named signals: diag, Stem bus, FR2433, FR2476. Do NOT trigger for generic MSP430 hobby/LaunchPad-buying questions, other MCUs (STM32, Arduino), or standalone mspdebug setup unrelated to this repo.
+============================================================
+Train: 18/36 correct, precision=100% recall=0% accuracy=50% (187.1s)
+  [FAIL] rate=0/3 expected=True: can you explain what the diag firmware does on boot and how 
+  [FAIL] rate=0/3 expected=True: how do bob-929, ziloo and this msp430 firmware relate - whic
+  [FAIL] rate=0/3 expected=True: just diag run fails with 'No unused FET found' and my /dev/c
+  [FAIL] rate=0/3 expected=True: where's the pin map for the msp430 supervisor? i need which 
+  [FAIL] rate=0/3 expected=True: how do I flash the diag firmware to my launchpad and watch t
+  [FAIL] rate=0/3 expected=True: i want to add a diag test for the APDS-9960 gesture sensor (
+  [PASS] rate=0/3 expected=False: i'm writing firmware for an stm32f411 nucleo in rust with em
+  [PASS] rate=0/3 expected=False: help me write the kickstarter campaign copy and pledge tiers
+  [PASS] rate=0/3 expected=False: help me fix mspdebug on my mac - it prints 'library load dis
+  [PASS] rate=0/3 expected=False: generate an arduino sketch to read a vl53l0x distance sensor
+  [PASS] rate=0/3 expected=False: what msp430 launchpad should i buy to start learning embedde
+  [PASS] rate=0/3 expected=False: review this elixir phoenix liveview module for the thepia fl
+Test : 12/24 correct, precision=100% recall=0% accuracy=50% (0.0s)
+  [FAIL] rate=0/3 expected=True: setting up github actions CI for the msp-fw build - does it 
+  [FAIL] rate=0/3 expected=True: we're about to order the production batch and need to choose
+  [FAIL] rate=0/3 expected=True: the fr2476 PAC is missing a field on the ADC register i need
+  [FAIL] rate=0/3 expected=True: add an example under examples/ that toggles a gpio on the fr
+  [PASS] rate=0/3 expected=False: design the 3d-printed enclosure and mounting bracket for the
+  [PASS] rate=0/3 expected=False: explain how i2c 7-bit addressing and clock stretching work i
+  [PASS] rate=0/3 expected=False: how do i drive an ssd1306 oled over i2c from a raspberry pi 
+  [PASS] rate=0/3 expected=False: write a python script to parse the event-log CSV my ziloo ex
+
+Improving description...
+Proposed (45.7s): Use whenever a query touches the msp-fw MSP430 firmware or its products bob-929 and ziloo. Strong triggers — treat any of these as a match: the `diag` firmware / power-on self-test (what it does on boot, pass/fail logic, adding a device or I²C-sensor test like APDS-9960 and where the driver goes); building, flashing, or monitoring serial output for this firmware; `just diag run` (including errors like "No unused FET found" or a vanished usbmodem/cu port); the `connections.toml` pin/signal registry or "which pin does the Stem I²C SDA / supervisor signal land on"; regenerating an svd2rust PAC; the FR2433/FR2476 parts; or how bob-929, ziloo, and this firmware relate. When `diag`, Stem, bob-929, ziloo, connections.toml, or `just` appear, lean toward triggering even if the phrasing sounds generic. Skip only truly generic MSP430 hobby/LaunchPad-buying advice or unrelated MCUs (STM32, Arduino) with no tie to this project.
+
+============================================================
+Iteration 5/5
+Description: Use whenever a query touches the msp-fw MSP430 firmware or its products bob-929 and ziloo. Strong triggers — treat any of these as a match: the `diag` firmware / power-on self-test (what it does on boot, pass/fail logic, adding a device or I²C-sensor test like APDS-9960 and where the driver goes); building, flashing, or monitoring serial output for this firmware; `just diag run` (including errors like "No unused FET found" or a vanished usbmodem/cu port); the `connections.toml` pin/signal registry or "which pin does the Stem I²C SDA / supervisor signal land on"; regenerating an svd2rust PAC; the FR2433/FR2476 parts; or how bob-929, ziloo, and this firmware relate. When `diag`, Stem, bob-929, ziloo, connections.toml, or `just` appear, lean toward triggering even if the phrasing sounds generic. Skip only truly generic MSP430 hobby/LaunchPad-buying advice or unrelated MCUs (STM32, Arduino) with no tie to this project.
+============================================================
+Train: 18/36 correct, precision=100% recall=0% accuracy=50% (186.7s)
+  [FAIL] rate=0/3 expected=True: can you explain what the diag firmware does on boot and how 
+  [FAIL] rate=0/3 expected=True: just diag run fails with 'No unused FET found' and my /dev/c
+  [FAIL] rate=0/3 expected=True: how do bob-929, ziloo and this msp430 firmware relate - whic
+  [FAIL] rate=0/3 expected=True: where's the pin map for the msp430 supervisor? i need which 
+  [FAIL] rate=0/3 expected=True: how do I flash the diag firmware to my launchpad and watch t
+  [FAIL] rate=0/3 expected=True: i want to add a diag test for the APDS-9960 gesture sensor (
+  [PASS] rate=0/3 expected=False: i'm writing firmware for an stm32f411 nucleo in rust with em
+  [PASS] rate=0/3 expected=False: help me write the kickstarter campaign copy and pledge tiers
+  [PASS] rate=0/3 expected=False: generate an arduino sketch to read a vl53l0x distance sensor
+  [PASS] rate=0/3 expected=False: help me fix mspdebug on my mac - it prints 'library load dis
+  [PASS] rate=0/3 expected=False: what msp430 launchpad should i buy to start learning embedde
+  [PASS] rate=0/3 expected=False: review this elixir phoenix liveview module for the thepia fl
+Test : 12/24 correct, precision=100% recall=0% accuracy=50% (0.0s)
+  [FAIL] rate=0/3 expected=True: setting up github actions CI for the msp-fw build - does it 
+  [FAIL] rate=0/3 expected=True: we're about to order the production batch and need to choose
+  [FAIL] rate=0/3 expected=True: the fr2476 PAC is missing a field on the ADC register i need
+  [FAIL] rate=0/3 expected=True: add an example under examples/ that toggles a gpio on the fr
+  [PASS] rate=0/3 expected=False: design the 3d-printed enclosure and mounting bracket for the
+  [PASS] rate=0/3 expected=False: explain how i2c 7-bit addressing and clock stretching work i
+  [PASS] rate=0/3 expected=False: write a python script to parse the event-log CSV my ziloo ex
+  [PASS] rate=0/3 expected=False: how do i drive an ssd1306 oled over i2c from a raspberry pi 
+
+Max iterations reached (5).
+
+Exit reason: max_iterations (5)
+Best score: 4/8 (iteration 1)
+
+Report: /var/folders/3z/21fx2gmx2rv7hsmz7rysfss00000gn/T/skill_description_report_msp-fw-dev_20260830_215446.html
+{
+  "exit_reason": "max_iterations (5)",
+  "original_description": "Orientation and workflow for developing MSP430 firmware in the msp-fw repo \u2014 building/flashing via the Docker toolchain + `just`, generating/regenerating svd2rust PACs, writing and extending the Rust `diag` power-on self-test firmware, wiring signals through the `connections.toml` registry, and the product's high-level goals (multiple MSP430s as low-power supervisor / I/O-extender nodes; FR2433 as the default part, FR2476 where battery/rail monitoring is needed). Use this whenever working anywhere under `msp-fw/` \u2014 editing `diag/`, `pac/`, `board/`, `examples/`, the `justfile` or `docker/Dockerfile` \u2014 or when asked \"how do I build/flash/test this\", \"add a sensor/device test\", \"regenerate the PAC\", \"which MCU or PAC do we target\", \"where's the pin map\", or \"what is this firmware even for\". Be pushy about consulting it even for a one-line change: the repo has strong conventions (typed PAC register access, never-hang I\u00b2C, pins sourced from connections.toml, build-in-container/flash-on-host) that are easy to violate.",
+  "best_description": "Orientation and workflow for developing MSP430 firmware in the msp-fw repo \u2014 building/flashing via the Docker toolchain + `just`, generating/regenerating svd2rust PACs, writing and extending the Rust `diag` power-on self-test firmware, wiring signals through the `connections.toml` registry, and the product's high-level goals (multiple MSP430s as low-power supervisor / I/O-extender nodes; FR2433 as the default part, FR2476 where battery/rail monitoring is needed). Use this whenever working anywhere under `msp-fw/` \u2014 editing `diag/`, `pac/`, `board/`, `examples/`, the `justfile` or `docker/Dockerfile` \u2014 or when asked \"how do I build/flash/test this\", \"add a sensor/device test\", \"regenerate the PAC\", \"which MCU or PAC do we target\", \"where's the pin map\", or \"what is this firmware even for\". Be pushy about consulting it even for a one-line change: the repo has strong conventions (typed PAC register access, never-hang I\u00b2C, pins sourced from connections.toml, build-in-container/flash-on-host) that are easy to violate.",
+  "best_score": "4/8",
+  "best_train_score": "6/12",
+  "best_test_score": "4/8",
+  "final_description": "Use whenever a query touches the msp-fw MSP430 firmware or its products bob-929 and ziloo. Strong triggers \u2014 treat any of these as a match: the `diag` firmware / power-on self-test (what it does on boot, pass/fail logic, adding a device or I\u00b2C-sensor test like APDS-9960 and where the driver goes); building, flashing, or monitoring serial output for this firmware; `just diag run` (including errors like \"No unused FET found\" or a vanished usbmodem/cu port); the `connections.toml` pin/signal registry or \"which pin does the Stem I\u00b2C SDA / supervisor signal land on\"; regenerating an svd2rust PAC; the FR2433/FR2476 parts; or how bob-929, ziloo, and this firmware relate. When `diag`, Stem, bob-929, ziloo, connections.toml, or `just` appear, lean toward triggering even if the phrasing sounds generic. Skip only truly generic MSP430 hobby/LaunchPad-buying advice or unrelated MCUs (STM32, Arduino) with no tie to this project.",
+  "iterations_run": 5,
+  "holdout": 0.4,
+  "train_size": 12,
+  "test_size": 8,
+  "history": [
+    {
+      "iteration": 1,
+      "description": "Orientation and workflow for developing MSP430 firmware in the msp-fw repo \u2014 building/flashing via the Docker toolchain + `just`, generating/regenerating svd2rust PACs, writing and extending the Rust `diag` power-on self-test firmware, wiring signals through the `connections.toml` registry, and the product's high-level goals (multiple MSP430s as low-power supervisor / I/O-extender nodes; FR2433 as the default part, FR2476 where battery/rail monitoring is needed). Use this whenever working anywhere under `msp-fw/` \u2014 editing `diag/`, `pac/`, `board/`, `examples/`, the `justfile` or `docker/Dockerfile` \u2014 or when asked \"how do I build/flash/test this\", \"add a sensor/device test\", \"regenerate the PAC\", \"which MCU or PAC do we target\", \"where's the pin map\", or \"what is this firmware even for\". Be pushy about consulting it even for a one-line change: the repo has strong conventions (typed PAC register access, never-hang I\u00b2C, pins sourced from connections.toml, build-in-container/flash-on-host) that are easy to violate.",
+      "train_passed": 6,
+      "train_failed": 6,
+      "train_total": 12,
+      "train_results": [
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "test_passed": 4,
+      "test_failed": 4,
+      "test_total": 8,
+      "test_results": [
+        {
+          "query": "setting up github actions CI for the msp-fw build - does it run in docker or native on the linux runner?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "we're about to order the production batch and need to choose between the msp430fr2433 and fr2476 - any firmware constraints before we commit?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "the fr2476 PAC is missing a field on the ADC register i need. how do i regenerate the pac from the svd?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "add an example under examples/ that toggles a gpio on the fr2433, in rust",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "design the 3d-printed enclosure and mounting bracket for the bob-929 camera module",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "explain how i2c 7-bit addressing and clock stretching work in general",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "write a python script to parse the event-log CSV my ziloo exported and plot detections over time",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "how do i drive an ssd1306 oled over i2c from a raspberry pi using python and luma.oled?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "passed": 6,
+      "failed": 6,
+      "total": 12,
+      "results": [
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "description": "Use when working on the msp-fw MSP430 firmware project \u2014 the Rust `diag` power-on self-test, the vendored svd2rust PACs, the `board/connections.toml` pin registry, or the `just`/Docker build-and-flash toolchain. Trigger for questions about: what the `diag` firmware does on boot and how it decides pass/fail; adding or extending a device/sensor diagnostic test and where its driver code goes; building, flashing, or monitoring serial output for this firmware (including `just diag run` failures, \"No unused FET found\", or a vanished usbmodem port); finding which MCU pin a signal (e.g. Stem I\u00b2C SDA) lands on; regenerating a PAC; or how this firmware relates to its sibling products (bob-929, ziloo) and their hardware. This is a specific project \u2014 do NOT trigger for generic MSP430 hobby/learning advice, buying a LaunchPad, other MCUs (STM32, Arduino), or standalone mspdebug/macOS-toolchain setup unrelated to this repo.",
+      "train_passed": 6,
+      "train_failed": 6,
+      "train_total": 12,
+      "train_results": [
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "test_passed": 4,
+      "test_failed": 4,
+      "test_total": 8,
+      "test_results": [
+        {
+          "query": "setting up github actions CI for the msp-fw build - does it run in docker or native on the linux runner?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "we're about to order the production batch and need to choose between the msp430fr2433 and fr2476 - any firmware constraints before we commit?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "the fr2476 PAC is missing a field on the ADC register i need. how do i regenerate the pac from the svd?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "add an example under examples/ that toggles a gpio on the fr2433, in rust",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "design the 3d-printed enclosure and mounting bracket for the bob-929 camera module",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "write a python script to parse the event-log CSV my ziloo exported and plot detections over time",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "how do i drive an ssd1306 oled over i2c from a raspberry pi using python and luma.oled?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "explain how i2c 7-bit addressing and clock stretching work in general",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "passed": 6,
+      "failed": 6,
+      "total": 12,
+      "results": [
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "iteration": 3,
+      "description": "Use for any work on the `msp-fw` MSP430 firmware repo \u2014 its Rust `diag` power-on self-test, the vendored svd2rust PACs, the `board/connections.toml` pin/signal registry, and the `just`/Docker build-flash-monitor toolchain. Trigger whenever the user asks to: explain what `diag` does on boot or how it decides pass/fail; add or extend a device/sensor diagnostic test (e.g. an I\u00b2C chip like APDS-9960) and where its driver goes; build, flash, or monitor serial output for this firmware, including `just diag run` errors like \"No unused FET found\" or a vanished usbmodem port; find which MCU pin a signal lands on (Stem I\u00b2C SDA, supervisor pin map); regenerate a PAC; or how this firmware relates to sibling products bob-929 and ziloo. Prefer triggering when any project name appears (diag, connections.toml, Stem bus, bob-929, ziloo, FR2433/FR2476). Skip only generic MSP430 hobby/learning, LaunchPad-buying, or unrelated-MCU questions with no tie to this repo.",
+      "train_passed": 6,
+      "train_failed": 6,
+      "train_total": 12,
+      "train_results": [
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "test_passed": 4,
+      "test_failed": 4,
+      "test_total": 8,
+      "test_results": [
+        {
+          "query": "setting up github actions CI for the msp-fw build - does it run in docker or native on the linux runner?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "we're about to order the production batch and need to choose between the msp430fr2433 and fr2476 - any firmware constraints before we commit?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "add an example under examples/ that toggles a gpio on the fr2433, in rust",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "the fr2476 PAC is missing a field on the ADC register i need. how do i regenerate the pac from the svd?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "design the 3d-printed enclosure and mounting bracket for the bob-929 camera module",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "explain how i2c 7-bit addressing and clock stretching work in general",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "write a python script to parse the event-log CSV my ziloo exported and plot detections over time",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "how do i drive an ssd1306 oled over i2c from a raspberry pi using python and luma.oled?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "passed": 6,
+      "failed": 6,
+      "total": 12,
+      "results": [
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "iteration": 4,
+      "description": "Use when the user is working on **this specific MSP430 firmware project** (the `msp-fw` repo and its `diag` self-test, `connections.toml` pin registry, svd2rust PACs, and `just`/Docker toolchain) or its sibling products **bob-929** and **ziloo**. Trigger when they want to: understand or extend the `diag` power-on self-test (what it does on boot, pass/fail logic, adding a sensor/I\u00b2C device test like APDS-9960 and where the driver goes); build, flash, or monitor serial output for the firmware, or debug `just diag run` issues (\"No unused FET found\", a vanished usbmodem/cu port); look up which MCU pin a signal lands on (Stem I\u00b2C SDA, supervisor pin map); regenerate a PAC; or learn how the firmware relates to bob-929/ziloo. Named signals: diag, Stem bus, FR2433, FR2476. Do NOT trigger for generic MSP430 hobby/LaunchPad-buying questions, other MCUs (STM32, Arduino), or standalone mspdebug setup unrelated to this repo.",
+      "train_passed": 6,
+      "train_failed": 6,
+      "train_total": 12,
+      "train_results": [
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "test_passed": 4,
+      "test_failed": 4,
+      "test_total": 8,
+      "test_results": [
+        {
+          "query": "setting up github actions CI for the msp-fw build - does it run in docker or native on the linux runner?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "we're about to order the production batch and need to choose between the msp430fr2433 and fr2476 - any firmware constraints before we commit?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "the fr2476 PAC is missing a field on the ADC register i need. how do i regenerate the pac from the svd?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "add an example under examples/ that toggles a gpio on the fr2433, in rust",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "design the 3d-printed enclosure and mounting bracket for the bob-929 camera module",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "explain how i2c 7-bit addressing and clock stretching work in general",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "how do i drive an ssd1306 oled over i2c from a raspberry pi using python and luma.oled?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "write a python script to parse the event-log CSV my ziloo exported and plot detections over time",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "passed": 6,
+      "failed": 6,
+      "total": 12,
+      "results": [
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "iteration": 5,
+      "description": "Use whenever a query touches the msp-fw MSP430 firmware or its products bob-929 and ziloo. Strong triggers \u2014 treat any of these as a match: the `diag` firmware / power-on self-test (what it does on boot, pass/fail logic, adding a device or I\u00b2C-sensor test like APDS-9960 and where the driver goes); building, flashing, or monitoring serial output for this firmware; `just diag run` (including errors like \"No unused FET found\" or a vanished usbmodem/cu port); the `connections.toml` pin/signal registry or \"which pin does the Stem I\u00b2C SDA / supervisor signal land on\"; regenerating an svd2rust PAC; the FR2433/FR2476 parts; or how bob-929, ziloo, and this firmware relate. When `diag`, Stem, bob-929, ziloo, connections.toml, or `just` appear, lean toward triggering even if the phrasing sounds generic. Skip only truly generic MSP430 hobby/LaunchPad-buying advice or unrelated MCUs (STM32, Arduino) with no tie to this project.",
+      "train_passed": 6,
+      "train_failed": 6,
+      "train_total": 12,
+      "train_results": [
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "test_passed": 4,
+      "test_failed": 4,
+      "test_total": 8,
+      "test_results": [
+        {
+          "query": "setting up github actions CI for the msp-fw build - does it run in docker or native on the linux runner?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "we're about to order the production batch and need to choose between the msp430fr2433 and fr2476 - any firmware constraints before we commit?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "the fr2476 PAC is missing a field on the ADC register i need. how do i regenerate the pac from the svd?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "add an example under examples/ that toggles a gpio on the fr2433, in rust",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "design the 3d-printed enclosure and mounting bracket for the bob-929 camera module",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "explain how i2c 7-bit addressing and clock stretching work in general",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "write a python script to parse the event-log CSV my ziloo exported and plot detections over time",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "how do i drive an ssd1306 oled over i2c from a raspberry pi using python and luma.oled?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "passed": 6,
+      "failed": 6,
+      "total": 12,
+      "results": [
+        {
+          "query": "can you explain what the diag firmware does on boot and how it decides pass vs fail?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "just diag run fails with 'No unused FET found' and my /dev/cu.usbmodem vanished after i was probing the OLED",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do bob-929, ziloo and this msp430 firmware relate - which product uses it and how?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "where's the pin map for the msp430 supervisor? i need which pin the stem i2c SDA lands on",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "how do I flash the diag firmware to my launchpad and watch the serial output? i'm on my mac, just diag run built fine",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i want to add a diag test for the APDS-9960 gesture sensor (i2c 0x39) - where does the driver code go and what conventions do i follow?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm writing firmware for an stm32f411 nucleo in rust with embassy, how do i flash it with probe-rs?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me write the kickstarter campaign copy and pledge tiers for ziloo",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "generate an arduino sketch to read a vl53l0x distance sensor and print centimeters over serial",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "help me fix mspdebug on my mac - it prints 'library load disallowed by system policy' when i run tilib",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "what msp430 launchpad should i buy to start learning embedded as a hobby, and which ide?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "review this elixir phoenix liveview module for the thepia flows dashboard",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ]
+    }
+  ]
+}
