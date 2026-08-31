@@ -24,6 +24,18 @@ build:
         docker run --rm --platform linux/amd64 -e DIAG_BUILD -v "$PWD":/work -w /work {{image}} just diag build
     fi
 
+# build + flash the STRESS ROM (I2C clock-margin sweep + error-rate soak; --features stress).
+# NOT the POST — watch results with `just monitor`. Reflash the normal ROM with `just diag run`.
+stress:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f /.dockerenv ]; then
+        ( cd diag && cargo build --release --features stress && msp430-elf-size target/msp430-none-elf/release/diag )
+    else
+        docker run --rm --platform linux/amd64 -v "$PWD":/work -w /work {{image}} just diag stress
+        just diag flash
+    fi
+
 # flash diag's built ELF to the connected board (host; needs msp430-macos-dev setup)
 flash:
     #!/usr/bin/env bash
@@ -31,6 +43,9 @@ flash:
     elf="diag/target/msp430-none-elf/release/diag"
     [ -f "$elf" ] || { echo "no built ELF — run 'just diag build' first" >&2; exit 1; }
     echo "flashing $elf"
+    # Clear a stale FET holder first: a lingering mspdebug (or a `just diag run`/`just monitor`
+    # that didn't release) makes tilib fail with "No unused FET found". Cheap self-heal.
+    if pgrep -x mspdebug >/dev/null 2>&1; then echo "  freeing stale mspdebug"; pkill -x mspdebug || true; sleep 1; fi
     # program then detach: on release tilib runs the target (MSP430_Run), so the board
     # executes the new firmware and this returns immediately.
     DYLD_FALLBACK_LIBRARY_PATH={{libdir}} {{mspdebug}} tilib "prog $elf" exit
@@ -70,3 +85,19 @@ run:
         echo "  chip id was 'unknown' and no write happened, the old FRAM image is still live." >&2
         exit 1
     fi
+
+# HIL: flash an ALREADY-BUILT ELF and assert the POST over UART. Used by the self-hosted CI
+# runner (the ELF arrives as the cloud build artifact — this recipe never builds). Asserts the
+# firmware reports EXPECT_STAMP, the expected devices are present, and nothing is FAULTY.
+# Locally: `EXPECT_STAMP=$(git rev-parse HEAD) just diag hil` after a `just diag build`.
+hil:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    elf="diag/target/msp430-none-elf/release/diag"
+    [ -f "$elf" ] || { echo "no ELF at $elf — build or download the artifact first" >&2; exit 1; }
+    echo "flashing $elf"
+    DYLD_FALLBACK_LIBRARY_PATH={{libdir}} {{mspdebug}} tilib "prog $elf" exit
+    port="$(ls -1 /dev/cu.usbmodem* 2>/dev/null | sort | tail -1)"
+    [ -n "$port" ] || { echo "no /dev/cu.usbmodem* — run 'just usb status'" >&2; exit 1; }
+    stty -f "$port" 9600 cs8 -cstopb -parenb raw -echo
+    python3 diag/tests/hil_assert.py --port "$port" --stamp "${EXPECT_STAMP:-}"

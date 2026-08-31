@@ -1,0 +1,10 @@
+[package]
+name = "sched"
+version = "0.1.0"
+edition = "2021"
+description = "Cooperative (run-to-completion) task scheduler for msp-fw. PAC-agnostic, no_std, no alloc — shared by diag, product firmware, and examples across FR2433/FR2476."
+
+# Intentionally zero dependencies: this crate is pure control-flow. It never touches a PAC or a
+# timer — the caller supplies the context and the current time — so the same code compiles for any
+# MSP430 part (or a host unit test). See the chip-portability convention in the msp-fw-dev skill.
+[dependencies]

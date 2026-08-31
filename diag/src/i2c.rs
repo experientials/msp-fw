@@ -66,6 +66,15 @@ pub fn recover(p: &Peripherals) -> bool {
     bitdelay();
 
     let freed = sda_high(p);
+    // Best practice: freeing the LINES above isn't enough — the eUSCI master can be left
+    // mid-transaction (a STOP that never completed), which is why a finished transfer could
+    // leave the bus low and force recovery every cycle. Resync the master's state machine with a
+    // UCSWRST toggle (UCMODE/UCMST/UCSSEL/UCBRW are all retained). Skip it when init() is driving
+    // us while already holding the peripheral in reset — its own sequence clears UCSWRST later.
+    if ctlw0(p) & UCSWRST == 0 {
+        p.e_usci_b0.ucb0ctlw0().modify(|r, w| unsafe { w.bits(r.bits() | UCSWRST) });
+        p.e_usci_b0.ucb0ctlw0().modify(|r, w| unsafe { w.bits(r.bits() & !UCSWRST) });
+    }
     p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | SDA_BIT | SCL_BIT) }); // back to eUSCI
     freed
 }
@@ -77,6 +86,20 @@ pub fn init(p: &Peripherals) {
         .ucb0ctlw0()
         .modify(|r, w| unsafe { w.bits(r.bits() | UCMODE_3 | UCMST | UCSYNC | UCSSEL_SMCLK) });
     p.e_usci_b0.ucb0brw().write(|w| unsafe { w.bits(10) }); // 1 MHz / 10 = 100 kHz
+    p.e_usci_b0
+        .ucb0ctlw0()
+        .modify(|r, w| unsafe { w.bits(r.bits() & !UCSWRST) });
+}
+
+/// Change the I²C bit clock: SCL = SMCLK (1 MHz) / `brw`. eUSCI requires UCSWRST to alter the baud
+/// divider, so we toggle it; mode/master/clock-source are retained. Used by the stress margin sweep
+/// to push SCL from 100 kHz (brw=10) up to 1 MHz (brw=1).
+#[cfg(feature = "stress")]
+pub fn set_brw(p: &Peripherals, brw: u16) {
+    p.e_usci_b0
+        .ucb0ctlw0()
+        .modify(|r, w| unsafe { w.bits(r.bits() | UCSWRST) });
+    p.e_usci_b0.ucb0brw().write(|w| unsafe { w.bits(brw) });
     p.e_usci_b0
         .ucb0ctlw0()
         .modify(|r, w| unsafe { w.bits(r.bits() & !UCSWRST) });

@@ -32,7 +32,7 @@ module   = "eUSCI_B0"
 sel      = "SEL0"
 dir      = "bidir"
 status   = "active"
-net      = "IS31FL3730 @0x61 (shared sensor bus)"
+net      = "IS31FL3730 @0x61 + APDS-9960 @0x39 + MC6470 eCompass @0x4C(accel)/0x0C(mag) (shared sensor bus)"
 notes    = "verified against datasheet pin table"
 
 [[connection]]
@@ -44,7 +44,7 @@ module   = "eUSCI_B0"
 sel      = "SEL0"
 dir      = "bidir"
 status   = "active"
-net      = "IS31FL3730 @0x61 (shared sensor bus)"
+net      = "IS31FL3730 @0x61 + APDS-9960 @0x39 + MC6470 eCompass @0x4C(accel)/0x0C(mag) (shared sensor bus)"
 notes    = "verified against datasheet pin table"
 
 [[connection]]
@@ -58,6 +58,18 @@ dir      = "out"
 status   = "active"
 net      = "IS31FL3730 SDB — drive HIGH to enable (examples/i2c-is31)"
 notes    = "Free header GPIO (UCA1RXD alt, unused). NOT P2.0 — that's crystal XOUT per slau802 fig 18. R3 (100k) pulls SDB LOW = shutdown by default (EB schematic Fig. 2), so driving HIGH is REQUIRED to enable the driver — must be wired P2.5 -> TP3 SDB."
+
+[[connection]]
+id       = "rcwl_out"
+signal   = "RCWL-0516 microwave radar motion OUT"
+pin      = "P2.4"
+function = "GPIO"
+module   = "PORT"
+sel      = "none"
+dir      = "in"
+status   = "active"
+net      = "RCWL-0516 OUT -> 2 kohm series -> P2.4. Digital: idles LOW, push-pull HIGH (~3.3 V) ~2 s per trigger, retriggerable. Sensor VIN=5 V, GND shared; 3V3 (regulator tap, an OUTPUT) and CDS pins left open."
+notes    = "Bench wiring on the FR2476 LaunchPad (Henrik, 2026-08-31). Datasheet: P2.4 = general-purpose I/O with port interrupt + wake-from-LPMx.5 (only alt fn UCA1CLK, unused), so it keeps a future wake-on-motion path — chosen over P1.6 precisely to avoid the VSOM ADC pin (vsom_adc). Configured as GPIO input + pulldown in diag/src/main.rs; read in diag/src/rcwl.rs. 2 kohm series resistor in the OUT line caps any fault current (accidental output contention, or radar back-driving an unpowered MCU through the ESD clamp) at ~1.65 mA, under the ±2 mA per-pin clamp-diode limit; high level still ~3.0-3.1 V at the pin after the divider with the internal pulldown, well above V_IH."
 
 [[connection]]
 id       = "uart_tx"

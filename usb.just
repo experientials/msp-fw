@@ -24,7 +24,7 @@ status:
     fi
     node=$(ls /dev/cu.usbmodem* 2>/dev/null || true)
     [ -n "$node" ] && echo "  dev : $node" || echo "  dev : no /dev/cu.usbmodem*"
-    h=$(pgrep -fl mspdebug || true)
+    h=$(pgrep -xl mspdebug || true)
     [ -n "$h" ] && echo "  hold: $h" || echo "  hold: no stale mspdebug"
     if [ "$bus" = 1 ] && [ -z "$node" ]; then
         echo "  -> on the bus but no /dev node = macOS quirk; log out / reboot to create it."

@@ -20,7 +20,7 @@ healthy?" — for a specific product/board config (Bob, Ziloo, or a module). Fou
 1. **Scan the buses** — I²C by address, SPI by chip-select + ID — to enumerate what's actually
    present, and flag anything **new or changed** vs. what's expected.
 2. **Validate against the expected config.** Each product/board has a known device set (declared
-   alongside the PAC / board config + [connections.toml](../board/connections.toml)). Diag checks
+   alongside the PAC / board config + [connections.toml](../crates/bsp/connections.toml)). Diag checks
    the *right* devices are present at the *right* addresses — not just "something answered."
    Missing or unexpected devices = **config drift**, reported explicitly.
 3. **Check the MSP430 itself** — clock/FLL locked, rails, key peripheral registers sane (the live
@@ -35,6 +35,17 @@ verification), not only a power-on light show.
 
 Every reset runs the same shape. **Init once, then loop a self-contained POST forever** so a
 technician can plug/unplug on the bench and watch it re-test live.
+
+Since the radar landed, the forever-loop is a **cooperative scheduler** (the shared
+[`sched`](../crates/sched/) crate), not a bare `run(); delay()`. `main` builds a context + a task table
+and loops `sched::tick(now)`; each task runs a short non-blocking step and returns when it next
+wants to run. The POST is one task (`PostTask`, ~3 s); the radar is another (`RadarTask`, variable
+rate) that samples P2.4 continuously and accumulates a motion window the POST reports. This is how
+"record levels at a fixed/variable rate", animation-style output, and inter-MCU comms will all
+slot in — as more tasks — without any of them blocking the others. The **never-block-in-a-task**
+rule is the whole contract; the watchdog is the backstop for a task that breaks it (cooperative
+scheduling has no preemption, so a wedged task can only be recovered by the WDT reset). Time base
+is a polled TB0 ms clock (`clock.rs`), still no ISR.
 
 ```
 reset
@@ -95,7 +106,7 @@ static TESTS: &[(&str, fn(&Peripherals) -> bool)] = &[
 Rules for a test:
 - **Never hang.** Use the bounded I²C helpers (`SPIN`-limited); a dead device must FAIL, not wedge.
 - **Prove a read, not just an ACK** where the chip has an ID register.
-- Put chip addresses/pins in [../board/connections.toml](../board/connections.toml) (the single
+- Put chip addresses/pins in [../crates/bsp/connections.toml](../crates/bsp/connections.toml) (the single
   source of truth) — don't scatter magic numbers.
 - Keep drivers in their own `src/<chip>.rs`; `diag.rs` only orchestrates.
 
@@ -129,7 +140,9 @@ Rules for a test:
 2. **Sensors on the bench** — APDS-9960 (0x39, WHO_AM_I 0xAB), VL53L0X/L1X (0x29),
    ICM-42605 IMU (0x68/69, WHO_AM_I 0x42).
 3. **Voltage rails** — VSOM/CHARGE via ADC (P1.6/P1.7) once wired; report levels + thresholds.
-4. **GPIO / presence** — RCWL-0516 motion (digital out), sensor INT lines.
+4. **GPIO / presence** — RCWL-0516 motion (digital out) **done** (P2.4, live MOTION/idle
+   readout in [src/rcwl.rs](src/rcwl.rs)); sensor INT lines still to wire. Next step for the
+   radar: enable the P2.4 port interrupt so the supervisor wakes on motion instead of polling.
 5. **Chip portability** — move off direct PAC pokes onto the feature-gated **board crate**
    (`fr2433`/`fr2476`) so one source builds per-chip; role/config from FRAM.
 
@@ -156,4 +169,4 @@ Rules for a test:
   is ever needed on FR2433, drop `embedded-graphics` for `ssd1306` raw-command/terminal mode (a few
   hundred bytes); the embedded-hal shim ([src/hal.rs](src/hal.rs)) stays either way. The graphics
   weight is diag's to spend — product firmware keeps its own tight budget.
-- **Single source of truth for pins** — [../board/connections.toml](../board/connections.toml).
+- **Single source of truth for pins** — [../crates/bsp/connections.toml](../crates/bsp/connections.toml).

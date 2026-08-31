@@ -1,0 +1,71 @@
+name: hil
+
+# Hardware-in-the-loop: build in the cloud, then flash + assert on a self-hosted runner
+# physically wired to an MSP430FR2476 (eZ-FET backchannel UART).
+#
+# SECURITY — this repo is PUBLIC. A self-hosted runner must never execute untrusted fork code,
+# so this workflow triggers ONLY on push to main and manual dispatch (never pull_request), and
+# the hardware job is gated behind the `bench-hardware` Environment. Fork PRs still get the cloud
+# compile gate (firmware.yml) but can never reach the bench machine.
+#
+# One-time setup on the bench Mac / repo:
+#   1. Register the Mac as a self-hosted runner with the label `msp430`
+#      (Settings → Actions → Runners). It needs: Docker not required (build is in the cloud),
+#      the msp430-macos-dev mspdebug setup, and `pip3 install pyserial`.
+#   2. Create an Environment named `bench-hardware` (Settings → Environments) with a required
+#      reviewer — so even a push to main pauses for a human before touching hardware.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Only one job may own the board at a time; never interrupt a flash mid-program.
+concurrency:
+  group: msp430-bench
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # x86_64 → the toolchain image runs native (no emulation)
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/msp430-toolchain:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build diag, stamped with the commit SHA
+        env:
+          DIAG_BUILD: ${{ github.sha }} # deterministic stamp the HIL job verifies over UART
+        run: just diag build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diag-${{ github.sha }}
+          path: diag/target/msp430-none-elf/release/diag
+          if-no-files-found: error
+
+  hil:
+    needs: build
+    runs-on: [self-hosted, msp430]
+    environment: bench-hardware # required-reviewer gate before any flashing
+    timeout-minutes: 10 # a wedged board can't clog the queue
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: diag-${{ github.sha }}
+          path: diag/target/msp430-none-elf/release/
+      - name: Ensure the eZ-FET is present and free
+        run: just usb recover
+      - name: Flash the built ELF and assert the POST over UART
+        env:
+          EXPECT_STAMP: ${{ github.sha }}
+        run: just diag hil
+      - name: Upload captured UART log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hil-uart-${{ github.sha }}
+          path: diag/tests/hil-capture.log
+          if-no-files-found: ignore

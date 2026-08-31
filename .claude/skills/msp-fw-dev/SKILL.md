@@ -72,7 +72,7 @@ check both products before assuming.
 |---|---|
 | `diag/` | Rust POST/diagnostic firmware (the current focus). See its [DESIGN.md](../../../diag/DESIGN.md) + [README.md](../../../diag/README.md). |
 | `pac/msp430fr2433/`, `pac/msp430fr2476/` | Vendored svd2rust PACs (typed register access). [pac/README.md](../../../pac/README.md). |
-| `board/connections.toml` | **Single source of truth** for every MCU pin/signal. [connections.toml](../../../board/connections.toml). |
+| `crates/bsp/connections.toml` | **Single source of truth** for every MCU pin/signal. [connections.toml](../../../crates/bsp/connections.toml). |
 | `examples/` | `hello-c`, `hello-rust` (toolchain smoke tests), plus WIP device examples. |
 | `justfile` + `*.just` | Command runner: `diag`, `pac`, `usb`, `example`, `check` modules. |
 | `docker/Dockerfile` | The one amd64 toolchain image (msp430-gcc + pinned Rust nightly + just). |
@@ -125,7 +125,7 @@ report a clear PASS/FAIL, and use the bounded I²C helpers so a dead device fail
 
 ## The connections registry
 
-`board/connections.toml` is the canonical map of signal → MCU pin → module/function → status. Add a
+`crates/bsp/connections.toml` is the canonical map of signal → MCU pin → module/function → status. Add a
 connection there (status `planned` → `active` only after verifying pin/function against the
 datasheet) **before** wiring it in code, and don't scatter magic pin numbers across modules. It is
 intended to drive both the C `board.h` and the Rust board crate.
@@ -154,6 +154,6 @@ intended to drive both the C `board.h` and the Rust board crate.
 | Extending / understanding `diag` | [diag/DESIGN.md](../../../diag/DESIGN.md) |
 | Regenerating or consuming a PAC | [pac/README.md](../../../pac/README.md) + macos-dev `rust-pac.md` |
 | Flashing / mspdebug / host toolchain / USB trouble | [msp430-macos-dev skill](https://github.com/experientials/bob-929/tree/main/.claude/skills/msp430-macos-dev) + `just usb` |
-| Pin assignments | [board/connections.toml](../../../board/connections.toml) |
+| Pin assignments | [crates/bsp/connections.toml](../../../crates/bsp/connections.toml) |
 | Product intent / protocol | FIRMWARE-API / I2C-API / STEM-MSG / HARDWARE (repo root) |
 | Which MCU / the port caveat | [bob-929/docs/MCU_SELECTION.md](https://github.com/experientials/bob-929/blob/main/docs/MCU_SELECTION.md) |

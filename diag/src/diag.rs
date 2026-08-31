@@ -25,11 +25,21 @@ static DEVICES: &[Dev] = &[
     Dev { name: "SSD1306 OLED  ", addr: 0x3C, id_reg: NO_ID, id_val: 0x00 },
     Dev { name: "VL53L0X ToF   ", addr: 0x29, id_reg: 0xC0, id_val: 0xEE },
     Dev { name: "APDS-9960     ", addr: 0x39, id_reg: 0x92, id_val: 0xAB },
-    Dev { name: "ICM-42605 IMU ", addr: 0x68, id_reg: 0x75, id_val: 0x42 },
+    // 6DOF IMU 13 Click (MIKROE-4228) is an mCube MC6470 eCompass — accel + magnetometer as two
+    // I2C sub-addresses (0x4C accel, 0x0C mag), NOT an ICM-42605. Presence-only for now; a WHO_AM_I
+    // check needs the chip-ID registers verified against the datasheet (0x4C/0x0C both ACK the scan).
+    Dev { name: "MC6470 accel  ", addr: 0x4C, id_reg: NO_ID, id_val: 0x00 },
+    Dev { name: "MC6470 mag    ", addr: 0x0C, id_reg: NO_ID, id_val: 0x00 },
     Dev { name: "IS31FL3730 LED", addr: 0x60, id_reg: NO_ID, id_val: 0x00 },
 ];
 
-fn scan(p: &Peripherals) {
+/// Is this address one of our expected devices? A scan hit that isn't = config drift.
+fn is_expected(addr: u8) -> bool {
+    DEVICES.iter().any(|d| d.addr == addr)
+}
+
+/// Scan the bus; return the count of **unexpected** addresses (ACKed but not in the registry).
+fn scan(p: &Peripherals) -> u16 {
     // Idle bus level (P1IN reflects the real pad even when muxed to UCB0):
     //   L = no pull-ups reaching us -> EB unpowered or SDA/SCL not connected.
     //   H = healthy idle bus.
@@ -50,11 +60,16 @@ fn scan(p: &Peripherals) {
     }
     uart::puts(p, "\nI2C scan:");
     let mut found = 0u16;
+    let mut unexpected = 0u16;
     let mut a = 0x08u8;
     while a <= 0x77 {
         if i2c::probe(p, a) {
             uart::puts(p, " 0x");
             uart::hex8(p, a);
+            if !is_expected(a) {
+                uart::puts(p, "?"); // ACKs but not a known device = config drift
+                unexpected += 1;
+            }
             found += 1;
         }
         a += 1;
@@ -62,7 +77,13 @@ fn scan(p: &Peripherals) {
     if found == 0 {
         uart::puts(p, " (none)");
     }
+    if unexpected > 0 {
+        uart::puts(p, "  (");
+        uart::dec(p, unexpected);
+        uart::puts(p, " UNEXPECTED)");
+    }
     uart::puts(p, "\n");
+    unexpected
 }
 
 /// Check every known device. Returns (present, total, faults):
@@ -111,6 +132,74 @@ fn check_devices(p: &Peripherals) -> (u16, u16, u16) {
     (present, total, faults)
 }
 
+/// A one-shot diagnostic test: prints its own section and returns a verdict. **Reorder `TESTS` to
+/// change the run order**; a future button menu / script selects a subset. This is diag's "bag of
+/// tests" — distinct from the continuous `sched::Task`s (radar/proximity), which run over time
+/// rather than once-to-a-verdict.
+enum Outcome {
+    Pass,
+    Fail,
+    /// Device absent / not applicable — reported, does NOT fail the verdict. This is how an
+    /// optional device (e.g. the OLED on the product) is handled.
+    Skip,
+}
+
+struct Test {
+    name: &'static str,
+    run: fn(&Peripherals) -> Outcome,
+}
+
+// The ordered test bag — reorder these lines to change what runs when.
+static TESTS: &[Test] = &[
+    Test { name: "bus scan", run: t_scan },
+    Test { name: "device inventory", run: t_devices },
+    Test { name: "MC6470 gravity", run: t_gravity },
+];
+
+/// Bus scan + config-drift: Fail if any unexpected address ACKed.
+fn t_scan(p: &Peripherals) -> Outcome {
+    if scan(p) > 0 {
+        Outcome::Fail
+    } else {
+        Outcome::Pass
+    }
+}
+
+/// Device inventory: presence + WHO_AM_I over the registry. Fail if anything present is faulty.
+fn t_devices(p: &Peripherals) -> Outcome {
+    let (present, total, faults) = check_devices(p);
+    let missing = total - present;
+    uart::puts(p, "  inventory: ");
+    uart::dec(p, present);
+    uart::puts(p, "/");
+    uart::dec(p, total);
+    uart::puts(p, " present");
+    if missing > 0 {
+        uart::puts(p, ", ");
+        uart::dec(p, missing);
+        uart::puts(p, " missing");
+    }
+    uart::puts(p, "\n");
+    if faults > 0 {
+        Outcome::Fail
+    } else {
+        Outcome::Pass
+    }
+}
+
+/// MC6470 accel gravity-sanity (|a| ~ 1 g). Skip when absent (optional device), else Pass/Fail.
+fn t_gravity(p: &Peripherals) -> Outcome {
+    if !i2c::probe(p, crate::mc6470::ACCEL_ADDR) {
+        uart::puts(p, "  MC6470 accel: absent (skip)\n");
+        return Outcome::Skip;
+    }
+    match crate::mc6470::gravity_check(p) {
+        Some(true) => Outcome::Pass,
+        Some(false) => Outcome::Fail,
+        None => Outcome::Skip, // not woken yet (cold-boot latency) — self-corrects next pass
+    }
+}
+
 pub fn run(p: &Peripherals) {
     // The build stamp rides on every banner (not just the boot line) so the verifier — or a
     // technician who attached the monitor late — can confirm which firmware is running within
@@ -118,30 +207,44 @@ pub fn run(p: &Peripherals) {
     uart::puts(p, "\n=== bob-929 diag POST · build ");
     uart::puts(p, env!("DIAG_BUILD"));
     uart::puts(p, " ===\n");
-    scan(p);
-    let (present, total, faults) = check_devices(p);
+    // Run the ordered test bag; each test prints its own section, here we tally the verdicts.
+    // `missing`/`UNEXPECTED`/`FAULTY` detail is printed inside the individual tests. Continuous
+    // radar/proximity sensing is NOT here — it lives in sched::Tasks.
+    let (mut pass, mut fail, mut skip) = (0u16, 0u16, 0u16);
+    for t in TESTS {
+        uart::puts(p, "· "); // section header names the test (the registry identifier a menu selects)
+        uart::puts(p, t.name);
+        uart::puts(p, "\n");
+        match (t.run)(p) {
+            Outcome::Pass => pass += 1,
+            Outcome::Fail => fail += 1,
+            Outcome::Skip => skip += 1,
+        }
+    }
 
     uart::puts(p, "summary: ");
-    uart::dec(p, present);
-    uart::puts(p, "/");
-    uart::dec(p, total);
-    uart::puts(p, " present");
-    if faults > 0 {
+    uart::dec(p, pass);
+    uart::puts(p, " passed");
+    if fail > 0 {
         uart::puts(p, ", ");
-        uart::dec(p, faults);
-        uart::puts(p, " FAULTY");
+        uart::dec(p, fail);
+        uart::puts(p, " FAILED");
+    }
+    if skip > 0 {
+        uart::puts(p, ", ");
+        uart::dec(p, skip);
+        uart::puts(p, " skipped");
     }
     uart::puts(p, "\n");
 
-    // Visual verdict on EVERY display present, but ALSO self-check: report each write's PASS/FAIL
-    // and probe the bus level right after, so we can see which write (if any) leaves the bus
-    // wedged. OK = nothing that answered is faulty. UART stays authoritative.
-    let ok = faults == 0;
+    // Visual verdict on every display present. OK = no test FAILED (skips don't fail). Each write's
+    // PASS/FAIL + a bus-level probe are reported so we can see which write (if any) wedges the bus.
+    let ok = fail == 0;
     uart::puts(p, "display:\n");
     uart::puts(p, "  OLED ");
     uart::puts(
         p,
-        match oled::show_status(p, ok, present, total) {
+        match oled::show_status(p, ok, pass, pass + fail + skip) {
             oled::Status::Ok => "rendered",
             oled::Status::InitFail => "init FAILED",
             oled::Status::FlushFail => "flush FAILED",
