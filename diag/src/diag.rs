@@ -136,7 +136,7 @@ fn check_devices(p: &Peripherals) -> (u16, u16, u16) {
 /// change the run order**; a future button menu / script selects a subset. This is diag's "bag of
 /// tests" — distinct from the continuous `sched::Task`s (radar/proximity), which run over time
 /// rather than once-to-a-verdict.
-enum Outcome {
+pub enum Outcome {
     Pass,
     Fail,
     /// Device absent / not applicable — reported, does NOT fail the verdict. This is how an
@@ -200,30 +200,39 @@ fn t_gravity(p: &Peripherals) -> Outcome {
     }
 }
 
-/// Run the POST test bag once. Returns `(ok, present, total)` for the caller to publish to the UI
-/// (the OLED is owned by `UiTask` now, not drawn here). `ok` = no test FAILED (skips don't fail).
-pub fn run(p: &Peripherals) -> (bool, u16, u16) {
-    // The build stamp rides on every banner (not just the boot line) so the verifier — or a
-    // technician who attached the monitor late — can confirm which firmware is running within
-    // one ~3 s cycle. `env!` resolves it from build.rs's DIAG_BUILD at compile time.
+// The POST test bag is driven cooperatively by `tasks::PostTask` — one test per scheduler tick — so
+// the OLED can show `DIAG N of M` live and the ~1.5 s scan no longer hogs the loop. These are the
+// pieces it orchestrates:
+
+/// Number of tests in the bag.
+pub fn test_count() -> usize {
+    TESTS.len()
+}
+
+/// Run test `i` (prints its own section header + body) and return its outcome.
+pub fn run_test(p: &Peripherals, i: usize) -> Outcome {
+    uart::puts(p, "· "); // section header names the test (the registry identifier)
+    uart::puts(p, TESTS[i].name);
+    uart::puts(p, "\n");
+    (TESTS[i].run)(p)
+}
+
+/// The current test's short name (for the OLED progress line).
+pub fn test_name(i: usize) -> &'static str {
+    TESTS[i].name
+}
+
+/// POST banner with the build stamp — printed once at the start of each pass. `env!` resolves it
+/// from build.rs's DIAG_BUILD, so a technician who attached the monitor late can confirm the running
+/// firmware within one cycle.
+pub fn banner(p: &Peripherals) {
     uart::puts(p, "\n=== bob-929 diag POST · build ");
     uart::puts(p, env!("DIAG_BUILD"));
     uart::puts(p, " ===\n");
-    // Run the ordered test bag; each test prints its own section, here we tally the verdicts.
-    // `missing`/`UNEXPECTED`/`FAULTY` detail is printed inside the individual tests. Continuous
-    // radar/proximity sensing is NOT here — it lives in sched::Tasks.
-    let (mut pass, mut fail, mut skip) = (0u16, 0u16, 0u16);
-    for t in TESTS {
-        uart::puts(p, "· "); // section header names the test (the registry identifier a menu selects)
-        uart::puts(p, t.name);
-        uart::puts(p, "\n");
-        match (t.run)(p) {
-            Outcome::Pass => pass += 1,
-            Outcome::Fail => fail += 1,
-            Outcome::Skip => skip += 1,
-        }
-    }
+}
 
+/// The summary line at the end of a pass.
+pub fn summary(p: &Peripherals, pass: u16, fail: u16, skip: u16) {
     uart::puts(p, "summary: ");
     uart::dec(p, pass);
     uart::puts(p, " passed");
@@ -238,10 +247,11 @@ pub fn run(p: &Peripherals) -> (bool, u16, u16) {
         uart::puts(p, " skipped");
     }
     uart::puts(p, "\n");
+}
 
-    // LED-matrix verdict (the OLED is rendered by UiTask from the returned verdict). OK = no test
-    // FAILED (skips don't fail). The bus-level probe after the write catches a wedged bus.
-    let ok = fail == 0;
+/// LED-matrix verdict glyph (the OLED is rendered by UiTask). `ok` = no test FAILED. The bus-level
+/// probe after the write catches a wedged bus.
+pub fn led_verdict(p: &Peripherals, ok: bool) {
     if is31::present(p) {
         let i = is31::init(p);
         let s = is31::show(p, if ok { &GLYPH_CHECK } else { &GLYPH_CROSS });
@@ -252,7 +262,6 @@ pub fn run(p: &Peripherals) -> (bool, u16, u16) {
         uart::puts(p, "\n");
         bus_lvl(p, "  bus after IS31: ");
     }
-    (ok, pass, pass + fail + skip)
 }
 
 /// One-line SDA/SCL pad level (P1IN reflects the real line even when the pins are muxed to eUSCI).

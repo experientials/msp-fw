@@ -34,12 +34,12 @@ impl Mode {
         }
     }
 
-    /// Short label for the OLED / console.
+    /// Short label for the OLED / console (the on-screen mode name).
     pub fn label(self) -> &'static str {
         match self {
-            Mode::Post => "POST",
-            Mode::Margin => "I2C MARGIN",
-            Mode::Soak => "I2C SOAK",
+            Mode::Post => "DIAG",
+            Mode::Margin => "I2C SPEED",
+            Mode::Soak => "I2C SCAN",
         }
     }
 }
@@ -63,15 +63,22 @@ pub struct Cx<'a> {
     /// Whether the OLED took its last `init()` (published by `UiTask`, reported by `PostTask`).
     /// Restores the "OLED rendered / init FAILED" health signal after the display moved to UiTask.
     pub oled_ok: bool,
+    // Progress (bottom-line "N of M" on the OLED): current step + total for the active mode.
+    pub prog_cur: u8,
+    pub prog_tot: u8,
+    /// Current POST test's name (for the DIAG progress line).
+    pub post_step_name: &'static str,
+    // Recorded errors (the OLED error shorthand + reported by the stress modes):
+    pub err_nack: u32,
+    pub err_corrupt: u32,
     // Stress status published by `StressTask`, rendered by `UiTask`:
     /// 0 idle, 1 sweeping, 2 sweep done, 3 soaking.
     pub st_phase: u8,
-    pub st_khz: u16, // current sweep step
+    pub st_khz: u16, // current sweep step (kHz)
     pub st_max: u16, // best clean clock found
     pub st_secs: u32, // soak elapsed
     pub st_txn_m: u32, // soak transactions (millions + remainder)
     pub st_txn: u32,
-    pub st_err: u32, // soak errors (nack + corrupt)
 }
 
 impl<'a> Cx<'a> {
@@ -86,13 +93,17 @@ impl<'a> Cx<'a> {
             post_present: 0,
             post_total: 0,
             oled_ok: true,
+            prog_cur: 0,
+            prog_tot: 0,
+            post_step_name: "",
+            err_nack: 0,
+            err_corrupt: 0,
             st_phase: 0,
             st_khz: 0,
             st_max: 0,
             st_secs: 0,
             st_txn_m: 0,
             st_txn: 0,
-            st_err: 0,
         }
     }
 }
@@ -188,40 +199,78 @@ impl<'a> Task<Cx<'a>> for ProximityTask {
     }
 }
 
-/// The periodic power-on self-test: runs the I²C scan + device checks + display verdict, then
-/// reports the blackboard values (radar window, APDS proximity) accumulated since the last pass
-/// and clears the ones that latch. Fixed ~3 s cadence (the period set in `main`; returns `None`).
-pub struct PostTask;
+/// The power-on self-test, run **cooperatively — one `Test` from `diag::TESTS` per tick**. That lets
+/// the OLED show `DIAG N of M` live and stops the ~1.5 s scan from hogging the loop (each test is
+/// one bounded poll). On the last test it prints the summary, drives the LED-matrix verdict, reports
+/// the sensor-window blackboard, then idles ~3 s before the next pass. Only runs in `Post` mode.
+pub struct PostTask {
+    step: usize,
+    pass: u16,
+    fail: u16,
+    skip: u16,
+}
+
+impl PostTask {
+    pub const fn new() -> Self {
+        Self { step: 0, pass: 0, fail: 0, skip: 0 }
+    }
+}
 
 impl<'a> Task<Cx<'a>> for PostTask {
     fn poll(&mut self, cx: &mut Cx<'a>, _now: u32) -> Option<u32> {
-        // Only the live POST runs the scan/verdict; stress modes take over. The verdict is published
-        // to the blackboard for UiTask to render — PostTask no longer touches the OLED directly.
         if cx.mode != Mode::Post {
+            self.step = 0; // restart the pass cleanly when we return to DIAG
             return Some(3000);
         }
-        let (ok, present, total) = diag::run(cx.p);
+        let p = cx.p;
+        if self.step == 0 {
+            diag::banner(p);
+            self.pass = 0;
+            self.fail = 0;
+            self.skip = 0;
+            cx.prog_tot = diag::test_count() as u8;
+        }
+
+        // Run exactly one test this tick, and publish progress for the OLED.
+        cx.post_step_name = diag::test_name(self.step);
+        match diag::run_test(p, self.step) {
+            diag::Outcome::Pass => self.pass += 1,
+            diag::Outcome::Fail => self.fail += 1,
+            diag::Outcome::Skip => self.skip += 1,
+        }
+        self.step += 1;
+        cx.prog_cur = self.step as u8;
+
+        if self.step < diag::test_count() {
+            return Some(40); // next test soon; UiTask renders the step between ticks
+        }
+
+        // Pass complete: summary, verdict, health + sensor report, then idle before the next pass.
+        diag::summary(p, self.pass, self.fail, self.skip);
+        let ok = self.fail == 0;
+        diag::led_verdict(p, ok);
         cx.post_ok = ok;
-        cx.post_present = present;
-        cx.post_total = total;
-        // OLED health (the panel is drawn by UiTask; this reports whether its last init took —
-        // restores the "OLED rendered / init FAILED" signal that used to live in diag::run).
-        uart::puts(cx.p, "  OLED: ");
-        uart::puts(cx.p, if cx.oled_ok { "ok\n" } else { "INIT FAILED\n" });
-        uart::puts(cx.p, "  radar window (P2.4): ");
-        uart::puts(cx.p, if cx.radar_seen { "motion, " } else { "idle, " });
-        uart::dec(cx.p, cx.radar_edges);
-        uart::puts(cx.p, " trigger(s)\n");
+        cx.post_present = self.pass;
+        cx.post_total = self.pass + self.fail + self.skip;
+        cx.err_nack = self.fail as u32; // DIAG "errors" = failed tests
+
+        uart::puts(p, "  OLED: ");
+        uart::puts(p, if cx.oled_ok { "ok\n" } else { "INIT FAILED\n" });
+        uart::puts(p, "  radar window (P2.4): ");
+        uart::puts(p, if cx.radar_seen { "motion, " } else { "idle, " });
+        uart::dec(p, cx.radar_edges);
+        uart::puts(p, " trigger(s)\n");
         cx.radar_seen = false;
         cx.radar_edges = 0;
-
-        uart::puts(cx.p, "  APDS-9960 prox (0x39): ");
+        uart::puts(p, "  APDS-9960 prox (0x39): ");
         match cx.apds_prox {
-            Some(v) => uart::dec(cx.p, v as u16),
-            None => uart::puts(cx.p, "n/a"),
+            Some(v) => uart::dec(p, v as u16),
+            None => uart::puts(p, "n/a"),
         }
-        uart::puts(cx.p, "\n");
-        None
+        uart::puts(p, "\n");
+
+        self.step = 0;
+        Some(3000)
     }
 
     fn name(&self) -> &'static str {
@@ -263,19 +312,41 @@ impl<'a> Task<Cx<'a>> for ButtonTask {
     }
 }
 
-/// **Sole owner of the OLED.** Renders the current state as a status screen (the user doesn't
-/// navigate it — it just reflects what the system is doing). Boots with a self-test: the panel is
-/// filled fully ON for ~1.5 s so we can *see* the raw driver works before trusting any layout.
-/// Then it shows POST / MARGIN / SOAK, reading verdict + stress status from the blackboard.
+/// **Sole owner of the OLED.** Reflects what the system is doing as a passive status screen (no
+/// navigation). Common 128×32 layout: **line 0 = mode name**, lines 1–2 = detail + the error
+/// shorthand, **line 3 (bottom) = `N of M` progress**. Boots with a self-test: the panel fills fully
+/// ON (~0.7 s, an unambiguous "the raw driver works" signal) then shows `BOOT / SELF TEST`, then the
+/// mode screens (`DIAG` / `I2C SPEED` / `I2C SCAN`). All values come from the blackboard.
 pub struct UiTask {
-    screen: Option<Mode>, // last-rendered mode (None until first draw)
     started: bool,
-    boot_end: u32,
+    t0: u32,          // boot start (ms)
+    boot_text: bool,  // drawn the "BOOT" text phase yet?
+    screen: Option<Mode>,
 }
 
 impl UiTask {
+    const BOOT_FILL_MS: u32 = 700; // white self-test flash
+    const BOOT_MS: u32 = 1600; // total boot splash before the first mode screen
+
     pub const fn new() -> Self {
-        Self { screen: None, started: false, boot_end: 0 }
+        Self { started: false, t0: 0, boot_text: false, screen: None }
+    }
+
+    /// Draw the bottom-line `N of M` progress.
+    fn progress(p: &msp430fr2476::Peripherals, cur: u8, tot: u8) {
+        let c = ssd::num(p, 3, 0, cur as u32);
+        let c = ssd::text(p, 3, c, " of ");
+        let c = ssd::num(p, 3, c, tot as u32);
+        ssd::clear_eol(p, 3, c);
+    }
+
+    /// Draw the error shorthand line (`NACK n CRPT n`).
+    fn errors(p: &msp430fr2476::Peripherals, line: u8, nack: u32, corrupt: u32) {
+        let c = ssd::text(p, line, 0, "NACK ");
+        let c = ssd::num(p, line, c, nack);
+        let c = ssd::text(p, line, c, " CRPT ");
+        let c = ssd::num(p, line, c, corrupt);
+        ssd::clear_eol(p, line, c);
     }
 }
 
@@ -283,17 +354,24 @@ impl<'a> Task<Cx<'a>> for UiTask {
     fn poll(&mut self, cx: &mut Cx<'a>, now: u32) -> Option<u32> {
         let p = cx.p;
 
-        // Boot self-test: init once, fill the whole panel ON. A fully-lit display is the
-        // unambiguous "the raw driver works" signal; hold it briefly before the first real screen.
+        // Boot self-test: init + fill fully ON. A lit panel proves the raw driver before any layout.
         if !self.started {
             self.started = true;
-            self.boot_end = now.wrapping_add(1500);
+            self.t0 = now;
             cx.oled_ok = ssd::init(p);
             ssd::fill(p, 0xFF);
-            return Some(200);
+            return Some(150);
         }
-        if now < self.boot_end {
-            return Some(100); // keep the self-test pattern up
+        let dt = now.wrapping_sub(self.t0);
+        if dt < Self::BOOT_MS {
+            if dt >= Self::BOOT_FILL_MS && !self.boot_text {
+                self.boot_text = true; // white flash done → show the BOOT splash text
+                ssd::clear(p);
+                ssd::text(p, 0, 0, "BOOT");
+                ssd::text(p, 1, 0, "SELF TEST");
+                ssd::text(p, 3, 0, if cx.oled_ok { "OLED OK" } else { "OLED FAIL" });
+            }
+            return Some(100);
         }
 
         let mode = cx.mode;
@@ -305,45 +383,48 @@ impl<'a> Task<Cx<'a>> for UiTask {
         }
 
         match mode {
+            // DIAG — line1 = current test, line2 = verdict, bottom = N of M.
             Mode::Post => {
-                ssd::text(p, 0, 0, "POST");
-                let c = ssd::text(p, 1, 0, "FOUND ");
-                let c = ssd::num(p, 1, c, cx.post_present as u32);
-                let c = ssd::text(p, 1, c, "/");
-                let c = ssd::num(p, 1, c, cx.post_total as u32);
+                ssd::text(p, 0, 0, "DIAG");
+                let c = ssd::text(p, 1, 0, cx.post_step_name);
                 ssd::clear_eol(p, 1, c);
-                ssd::text(p, 3, 0, if cx.post_ok { "OK" } else { "FAULT" });
+                let c = ssd::text(p, 2, 0, if cx.post_ok { "OK" } else { "FAULT" });
+                ssd::clear_eol(p, 2, c);
+                Self::progress(p, cx.prog_cur, cx.prog_tot);
             }
+            // I2C SPEED — line1 = clock (or MAX when done), line2 = errors, bottom = N of 5.
             Mode::Margin => {
-                ssd::text(p, 0, 0, "I2C MARGIN");
+                ssd::text(p, 0, 0, "I2C SPEED");
                 if cx.st_phase >= 2 {
-                    let c = ssd::text(p, 2, 0, "MAX:");
-                    let c = ssd::num(p, 2, c, cx.st_max as u32);
-                    let c = ssd::text(p, 2, c, "KHZ");
-                    ssd::clear_eol(p, 2, c);
+                    let c = ssd::text(p, 1, 0, "MAX ");
+                    let c = ssd::num(p, 1, c, cx.st_max as u32);
+                    let c = ssd::text(p, 1, c, " KHZ");
+                    ssd::clear_eol(p, 1, c);
+                    let c = ssd::text(p, 3, 0, "DONE");
+                    ssd::clear_eol(p, 3, c);
                 } else {
-                    let c = ssd::text(p, 2, 0, "SWEEP ");
-                    let c = ssd::num(p, 2, c, cx.st_khz as u32);
-                    let c = ssd::text(p, 2, c, "K");
-                    ssd::clear_eol(p, 2, c);
+                    let c = ssd::num(p, 1, 0, cx.st_khz as u32);
+                    let c = ssd::text(p, 1, c, " KHZ");
+                    ssd::clear_eol(p, 1, c);
+                    Self::progress(p, cx.prog_cur, cx.prog_tot);
                 }
+                Self::errors(p, 2, cx.err_nack, cx.err_corrupt);
             }
+            // I2C SCAN — line1 = elapsed, line2 = errors, bottom = transaction count.
             Mode::Soak => {
-                ssd::text(p, 0, 0, "I2C SOAK");
-                let c = ssd::text(p, 1, 0, "T=");
+                ssd::text(p, 0, 0, "I2C SCAN");
+                let c = ssd::text(p, 1, 0, "T ");
                 let c = ssd::num(p, 1, c, cx.st_secs);
                 let c = ssd::text(p, 1, c, "S");
                 ssd::clear_eol(p, 1, c);
-                let mut c = ssd::text(p, 2, 0, "N=");
+                Self::errors(p, 2, cx.err_nack, cx.err_corrupt);
+                let mut c = 0u8;
                 if cx.st_txn_m > 0 {
-                    c = ssd::num(p, 2, c, cx.st_txn_m);
-                    c = ssd::text(p, 2, c, "M");
+                    c = ssd::num(p, 3, 0, cx.st_txn_m);
+                    c = ssd::text(p, 3, c, "M ");
                 }
-                let c = ssd::num(p, 2, c, cx.st_txn);
-                ssd::clear_eol(p, 2, c);
-                let c = ssd::text(p, 3, 0, "ERR=");
-                let c = ssd::num(p, 3, c, cx.st_err);
-                let c = ssd::text(p, 3, c, if cx.st_err == 0 { " PASS" } else { " FAIL" });
+                let c = ssd::num(p, 3, c, cx.st_txn);
+                let c = ssd::text(p, 3, c, " TX");
                 ssd::clear_eol(p, 3, c);
             }
         }

@@ -50,8 +50,23 @@ first, because it caused the most churn:**
 - **SBW/SBW-attach resets the chip;** the `just monitor` `cat` stream is bursty (gaps are the
   monitor, not the firmware) — don't read a mid-stream gap as a firmware pause.
 
+## ROM budget & footprint (read before "trimming to fit")
+
+- **`diag/memory.x` maps only 32 KB of ROM** (`ORIGIN = 0x8000, LENGTH = 0x7F80`, END 0xFF7F) — but
+  the **FR2476 has 64 KB FRAM**. The upper 32 KB (0x10000+) is **unmapped**. So an "overflowed
+  region ROM by N bytes" link error at ~32 KB is a **linker-map** limit, not the chip being full.
+- Using the upper 32 KB needs the **large memory model** (20-bit far addressing); msp430 Rust-target
+  support for that is unverified — investigate before assuming it's free. Expanding the map is the
+  correct fix *before* sacrificing anything to fit.
+- **PRINCIPLE (hard rule): never remove robustness, error handling, or an abstraction to save
+  footprint.** The *only* sanctioned footprint lever is trimming the graphics stack, and only when
+  genuinely too big for the chip (not the map). Trimming graphics must not drag out unrelated things
+  (e.g. the `embedded-hal` HAL seam is ~0 ROM — removing it saves nothing and costs architecture).
+
 ## Display
 
-- The `ssd1306`/`embedded-graphics` crate stack was **removed** once diag approached the ROM budget
-  (reclaimed ~16 KB). All display is now the raw-I²C driver `diag/src/ssd1306_raw.rs` (SSD1306
-  128×32, 5×7 font). New display work uses raw I²C — do not re-add the graphics stack.
+- **Raw driver** `diag/src/ssd1306_raw.rs` (SSD1306 128×32, 5×7 font) is the display path; new
+  display work uses raw I²C. Single owner is `tasks::UiTask`.
+- The `ssd1306`/`embedded-graphics` crate stack (~16 KB) is **currently trimmed to fit the 32 KB
+  map, not permanently removed** — see the ROM-budget note. `hal.rs` (`embedded-hal::I2c` seam) is
+  **kept** even though its graphics consumer is gone.
