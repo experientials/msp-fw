@@ -4,6 +4,12 @@
 //! *diagnostic* I2C layer in [`crate::i2c`] (bounded spins, stuck-bus recovery) lives BELOW the
 //! ecosystem instead of being bypassed by it. When the board crate lands, this type moves there
 //! and gains the pin map + per-product device manifest; the trait surface stays the same.
+//!
+//! NOTE: currently has no in-tree consumer (the OLED status moved to the raw driver
+//! `ssd1306_raw`). Kept deliberately as the `embedded-hal::I2c` seam for portable `crates/devices`
+//! drivers + the product firmware — an unused impl is stripped by LTO, so it costs ~0 ROM. The
+//! `allow(dead_code)` means "retained abstraction, not yet consumed", not dead code to delete.
+#![allow(dead_code)]
 
 use embedded_hal::i2c::{self, ErrorType, I2c, Operation, SevenBitAddress};
 use msp430fr2476::Peripherals;

@@ -93,8 +93,7 @@ pub fn init(p: &Peripherals) {
 
 /// Change the I²C bit clock: SCL = SMCLK (1 MHz) / `brw`. eUSCI requires UCSWRST to alter the baud
 /// divider, so we toggle it; mode/master/clock-source are retained. Used by the stress margin sweep
-/// to push SCL from 100 kHz (brw=10) up to 1 MHz (brw=1).
-#[cfg(feature = "stress")]
+/// to push SCL from 100 kHz (brw=10) up to 1 MHz (brw=1), and to restore it afterwards.
 pub fn set_brw(p: &Peripherals, brw: u16) {
     p.e_usci_b0
         .ucb0ctlw0()

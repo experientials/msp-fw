@@ -19,12 +19,12 @@ Every element climbs the same rungs; "present" is nearly worthless alone — the
 | SSD1306 OLED | function (render) | — |
 | APDS-9960 | identity + function (proximity task) | ALS; INT-line event |
 | VL53L0X | identity (WHO_AM_I) | function (range a target) |
-| MC6470 (eCompass) | presence (0x4C accel, 0x0C mag) | identity; function (gravity ≈ 1 g) |
+| MC6470 (eCompass) | presence + **function (gravity ≈ 1 g)** | identity (WHO_AM_I); magnetometer |
 | RCWL-0516 radar | function (motion window) | duty/"level" |
-| Rails (VSOM/CHARGE) | none | function (ADC + thresholds) |
+| Rails (DVCC internal) | **function — measured DVCC via ADC** | external VSOM/CHARGE rails + thresholds |
 | Wake / event | none | prove one wake source |
-| Config-drift | none | expected-set manifest per product |
-| MCU self | reg dump; reset-cause (SYSRSTIV); clock-lock; **board id (chip/rev/die serial from TLV)** | measured Vcc + die temp (ADC); FRAM CRC |
+| Config-drift | scan flags UNEXPECTED addresses | expected-set manifest per product (hard-fail missing) |
+| MCU self | reg dump; reset-cause (SYSRSTIV); clock-lock; board id (chip/rev/die serial, TLV); **measured DVCC + die temp (ADC)** | FRAM CRC; per-interval trend/thresholds |
 
 ## Reporting model
 

@@ -138,6 +138,10 @@ intended to drive both the C `board.h` and the Rust board crate.
 - **Never hang.** Every I²C wait is bounded (`SPIN`); a stuck bus reports/`recover()`s, it doesn't
   freeze the loop. A diagnostic that hangs is worse than useless.
 - **Pins from `connections.toml`**, addresses/registers near their driver — one source of truth.
+- **Verify pins & config bits from the authoritative doc, never from memory/silk.** Board wiring →
+  LaunchPad user's guide (SLAU802) schematics; silicon config (ADC channels, PMM/reference bits,
+  TLV, BSL) → the device datasheet. Guessing a pin (e.g. the S1 button) burns a 2–3 min build+flash
+  cycle each miss. Known-good facts are collected in [references/hardware-notes.md](references/hardware-notes.md).
 - **Thin `just` recipes** — real logic goes in `scripts/` (sh, or python via `uv`), not the justfile.
 - **Chip-portable** — prefer the common FR2433/FR2476 peripheral subset; a feature-gated **board
   crate** (chip = cargo feature, role = FRAM config) is the planned layer that makes one source
@@ -155,5 +159,6 @@ intended to drive both the C `board.h` and the Rust board crate.
 | Regenerating or consuming a PAC | [pac/README.md](../../../pac/README.md) + macos-dev `rust-pac.md` |
 | Flashing / mspdebug / host toolchain / USB trouble | [msp430-macos-dev skill](https://github.com/experientials/bob-929/tree/main/.claude/skills/msp430-macos-dev) + `just usb` |
 | Pin assignments | [crates/bsp/connections.toml](../../../crates/bsp/connections.toml) |
+| **Board/silicon gotchas** (button pins, ADC/temp config, TLV IDs, BSL, device quirks) | [references/hardware-notes.md](references/hardware-notes.md) — **check before guessing any pin or ADC/PMM bit** |
 | Product intent / protocol | FIRMWARE-API / I2C-API / STEM-MSG / HARDWARE (repo root) |
 | Which MCU / the port caveat | [bob-929/docs/MCU_SELECTION.md](https://github.com/experientials/bob-929/blob/main/docs/MCU_SELECTION.md) |

@@ -24,17 +24,8 @@ build:
         docker run --rm --platform linux/amd64 -e DIAG_BUILD -v "$PWD":/work -w /work {{image}} just diag build
     fi
 
-# build + flash the STRESS ROM (I2C clock-margin sweep + error-rate soak; --features stress).
-# NOT the POST — watch results with `just monitor`. Reflash the normal ROM with `just diag run`.
-stress:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -f /.dockerenv ]; then
-        ( cd diag && cargo build --release --features stress && msp430-elf-size target/msp430-none-elf/release/diag )
-    else
-        docker run --rm --platform linux/amd64 -v "$PWD":/work -w /work {{image}} just diag stress
-        just diag flash
-    fi
+# Note: stress is no longer a separate build — it's a runtime task selected from the OLED menu
+# (S1 opens the menu, S2 cycles to "I2C MARGIN"/"I2C SOAK", S1 selects). One unified `just diag run`.
 
 # flash diag's built ELF to the connected board (host; needs msp430-macos-dev setup)
 flash:

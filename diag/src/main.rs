@@ -1,10 +1,6 @@
 #![no_main]
 #![no_std]
 #![feature(asm_experimental_arch)] // core::arch::asm! for SCG0 (SR bit) during FLL retune
-// The `stress` build replaces the POST/scheduler with a bus-hammering mode, so the POST modules go
-// unused there. Allow dead_code in that build rather than cfg-gate every module; the default build
-// stays strict.
-#![cfg_attr(feature = "stress", allow(dead_code))]
 
 //! bob-929 diagnostic firmware (Rust) — MSP430FR2476.
 //!
@@ -21,21 +17,19 @@ use msp430fr2476::Peripherals;
 
 mod adc;
 mod apds;
+mod buttons;
 mod clock;
 mod diag;
 mod hal;
 mod i2c;
 mod is31;
 mod mc6470;
-mod oled;
 mod rcwl;
 mod regs;
+mod ssd1306_raw;
+mod stress;
 mod tasks;
 mod uart;
-
-#[cfg(feature = "stress")]
-mod stress;
-#[cfg(feature = "stress")]
 mod usec;
 
 // Watchdog / power-management / clock-system bits (msp430fr2476.h).
@@ -139,6 +133,7 @@ fn main() -> ! {
     uart::init(&p);
     i2c::init(&p);
     adc::init(&p); // internal 1.5-V ref + ADC core, for measured Vcc/temperature in the board stats
+    buttons::init(&p); // S1/S2 for the OLED menu (GPIO in + pull-up)
 
     // Reset delineation: a chunky ASCII banner so each boot/reset is unmistakable when scrolling
     // back through a long `just monitor` capture (retro diag-ROM spirit). Build stamp rides along
@@ -161,27 +156,28 @@ fn main() -> ! {
     // never-block contract has no other way to be preempted.
     p.wdt_a.wdtctl().write(|w| unsafe { w.bits(WDT_BACKSTOP) });
 
-    // Stress build: replace the POST with the I2C margin + soak runner (diverges). See stress.rs
-    // + DIAGNOSTICS.md. Default build: run the cooperative scheduler.
-    #[cfg(feature = "stress")]
-    {
-        usec::start(&p);
-        stress::run(&p, &mut clock)
-    }
+    // µs time base (TA0 off SMCLK) — the stress task times each I²C transaction with it.
+    usec::start(&p);
 
-    #[cfg(not(feature = "stress"))]
+    // One unified firmware: the POST, the sensor tasks, and the (formerly `--features stress`) bus
+    // tests all run as cooperative tasks, switched at runtime via the button/OLED menu (see
+    // tasks::Mode). `cx` carries the shared blackboard; each task owns its private state. Boots into
+    // Mode::Post, so behaviour is the live self-test until S1 opens the menu.
     {
-        // Cooperative tasks (see tasks.rs + the `sched` crate). `cx` borrows the peripherals and
-        // carries the cross-task blackboard; each task owns its own private state. The radar samples
-        // continuously and accumulates a motion window; the POST reports + clears it every ~3 s.
         let mut cx = tasks::Cx::new(&p);
         let mut radar = tasks::RadarTask::new();
         let mut prox = tasks::ProximityTask::new();
         let mut post = tasks::PostTask;
+        let mut btn = tasks::ButtonTask::new();
+        let mut ui = tasks::UiTask::new();
+        let mut stress = stress::StressTask::new();
         let mut slots = [
             sched::Slot::every(50, &mut radar), // self-adjusts to 5 ms while motion is asserted
-            sched::Slot::every(200, &mut prox), // APDS-9960 proximity, 5 Hz
-            sched::Slot::every(3000, &mut post),
+            sched::Slot::every(200, &mut prox), // APDS-9960 proximity, 5 Hz (Post mode only)
+            sched::Slot::every(3000, &mut post), // POST scan/verdict (Post mode only)
+            sched::Slot::every(25, &mut btn),   // button scan / menu navigation
+            sched::Slot::every(200, &mut ui),   // OLED menu + stress status (raw driver)
+            sched::Slot::every(5, &mut stress), // bounded stress batches; self-idles when inactive
         ];
 
         let mut next_stats = 10_000u32; // scheduler deadline telemetry every ~10 s

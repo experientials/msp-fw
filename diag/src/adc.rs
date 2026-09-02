@@ -90,13 +90,3 @@ pub fn die_temp_c(p: &Peripherals) -> i16 {
     }
     ((raw - c30) * (105 - 30) / (c105 - c30) + 30) as i16
 }
-
-/// TEMP DEBUG (remove once temp is validated): raw temp-sensor ADC + the two TLV cal points, so we
-/// can see on hardware why the interpolation is off.
-pub fn temp_debug(p: &Peripherals) -> (u16, u16, u16) {
-    p.adc.adcmctl0().write(|w| w.adcsref().adcsref_1().adcinch().adcinch_12());
-    let raw = convert(p);
-    let c30 = unsafe { core::ptr::read_volatile(CAL_ADC_15T30) };
-    let c105 = unsafe { core::ptr::read_volatile(CAL_ADC_15T105) };
-    (raw, c30, c105)
-}

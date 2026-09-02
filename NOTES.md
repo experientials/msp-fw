@@ -1,7 +1,8 @@
 # msp-fw — working notes (for future sessions)
 
 Last updated 2026-09-01. State + next steps so we can resume after a context compaction.
-See also: [TOOLCHAIN.md](TOOLCHAIN.md), [TESTING.md](TESTING.md), [diag/DESIGN.md](diag/DESIGN.md),
+See also: [TOOLCHAIN.md](TOOLCHAIN.md), [RPI-BUILD-FLASH.md](RPI-BUILD-FLASH.md),
+[TESTING.md](TESTING.md), [diag/DESIGN.md](diag/DESIGN.md),
 [diag/DIAGNOSTICS.md](diag/DIAGNOSTICS.md), [examples/README.md](examples/README.md),
 [pac/README.md](pac/README.md), and the `msp430-macos-dev` skill.
 
@@ -12,11 +13,19 @@ diag is a working power-on self-test on the FR2476 LaunchPad. The I²C sensor bu
 RCWL radar and APDS proximity as tasks, and has a **feature-gated I²C stress mode**. All committed
 on `main` (`6962636`), 1 commit ahead of `origin` (unpushed).
 
-**Board state:** flashed with the **normal POST** (off the stress ROM). Newest build adds a boot
-ASCII banner (reset delineation), a `[board]` stats section (chip id / hw+fw rev / die serial read
-from the TLV device descriptor at 0x1A04 — *detected, not hardcoded*), and a cold-boot fix for the
-MC6470 gravity check (wake-poll for a non-zero sample; not-ready → Skip instead of a false FAIL).
-The banner/stats build (27,018 B) is built but **not yet flashed** at last note.
+**Board state:** **ONE unified firmware** (no more `--features stress`) — 17.8 KB, built clean,
+awaiting a flash of the menu build. Everything is a cooperative task switched at runtime via a
+**button + OLED menu** (`tasks::Mode`): boots into `Post` (live self-test, unchanged), **S1** opens
+the menu / backs out, **S2** cycles `POST LIVE / I2C MARGIN / I2C SOAK`, **S1** selects. Stress is
+now `stress::StressTask` (bounded cooperative batches, not a blocking `-> !` runner). The
+**ssd1306/embedded-graphics stack was removed** (the trim the design anticipated) — all display is
+now the raw driver `ssd1306_raw.rs`; that reclaimed ~16 KB and pushed diag from ~28 KB to 17.8 KB
+(now FR2433-viable). Also on board, verified earlier: boot ASCII banner; `[board]` stats (chip/rev/
+die-serial from TLV 0x1A04, reads `832A`); **measured DVCC + die temp** (`adc.rs`, A13/A12, ~3.31 V
+/ ~31 °C), boot + periodic `board:` line; MC6470 gravity cold-boot fix (wake-poll → Skip).
+Gotchas banked: FR2xx **temp sensor needs `TSENSOREN` in PMMCTL2** (separate from `INTREFEN`);
+**buttons S1=P1.6 / S2=P2.3** are a bench-silk assumption — if unresponsive, check the LaunchPad
+schematic (`buttons.rs`).
 
 ### The bus today (shared eUSCI_B0, SDA=P1.2 / SCL=P1.3, one 3.3 V domain)
 
@@ -38,13 +47,18 @@ The banner/stats build (27,018 B) is built but **not yet flashed** at last note.
   `sched::tick`. `clock.rs` = polled **TB0** ms time base (no ISR). Tasks: `RadarTask` (variable
   rate), `ProximityTask` (APDS), `PostTask` (~3 s POST + report). Rule: **never block in a task**;
   the WDT is the backstop (cooperative = no preemption).
-- **Stress mode** (`--features stress` / `just diag stress`) — replaces the POST with an I²C
-  clock-margin sweep (100 k→1 MHz) + cumulative error-rate soak; `usec.rs` = **TA0** µs timer.
-  Verified reads (known-value register compare) catch bit-corruption, not just NACKs. The soak runs
-  at the **fastest clean clock the sweep found** (1 MHz if it passes there), i.e. it stresses the
-  edge, not the gentle operating clock. Spec + thresholds in `diag/DIAGNOSTICS.md`. Default POST
-  build untouched (~23 KB); stress ROM ~6 KB.
-- **Scheduler deadline telemetry** — always-on in the POST (not the stress ROM): `sched` tracks
+- **Button + OLED menu (`tasks::ButtonTask` + `UiTask` + `Mode`)** — the unification milestone: one
+  firmware, tasks switched at runtime instead of `--features`. `Post` (live self-test) is the
+  default; **S1** = menu/back, **S2** = next item, **S1-in-menu** = select (`POST LIVE / I2C MARGIN
+  / I2C SOAK`). Menu/status rendered with the raw `ssd1306_raw.rs` driver (5×7 font). Buttons on
+  P1.6/P2.3 (bench assumption, `buttons.rs`).
+- **Stress as a cooperative task (`stress::StressTask`)** — the old blocking `--features stress`
+  `-> !` runner is gone; it now advances a bounded batch of *verified* reads per `poll` and yields.
+  Margin sweep (100 k→1 MHz) + cumulative error-rate soak (@100 kHz operating clock); `usec.rs` =
+  **TA0** µs timer (always built now). Verified reads catch bit-corruption, not just NACKs. Publishes
+  progress to the blackboard for `UiTask`; still prints the full lines over UART. Spec in
+  `diag/DIAGNOSTICS.md`.
+- **Scheduler deadline telemetry** — always-on: `sched` tracks
   per-task `max_late` + `overruns` (from ms `now`, no hardware); `main` prints a `sched:` line every
   ~10 s. Quantifies the "task running too long" concern — the ~3 s POST hogs the loop, so radar/prox
   show that as their max-late.
@@ -53,9 +67,18 @@ The banner/stats build (27,018 B) is built but **not yet flashed** at last note.
 
 - **Retro-diag-ROM ethos: keep diag lean.** Spirit of an Amiga/C64 diag ROM (a few KB). It's a
   bring-up/health tool, not a product.
-- **Graphics stack (`ssd1306`/`embedded-graphics`, ~16 KB of the current 23.5 KB) is FROZEN, not a
-  foundation.** Do not build new features on it — new display work uses **raw-I²C SSD1306 writes**.
-  This is the firm constraint.
+- **Graphics stack (`ssd1306`/`embedded-graphics`) — currently trimmed, NOT a settled decision.**
+  It came out to fit the unified firmware, but the "ROM ceiling" it hit was the **linker map's
+  32 KB** (`diag/memory.x` ROM = 0x8000–0xFF7F), **not the chip** — the FR2476 has **64 KB FRAM**;
+  the upper 32 KB (0x10000+) is unmapped. The real fix is mapping the full 64 KB (needs the large
+  memory model / 20-bit addressing — msp430 Rust support TBC), after which graphics can return
+  alongside everything. Graphics reduction is a "when genuinely too big" lever and **is not
+  pressing** — do not treat this trim as permanent. Display functionality is intact via the raw
+  `ssd1306_raw.rs` driver; new display work still uses raw I²C.
+- **HAL abstraction (`hal.rs` `EusciI2c` = `embedded-hal::I2c` seam) — KEPT.** Was briefly removed
+  with the graphics stack (its only consumer), but it's ~0 ROM (LTO strips the unused impl) and is
+  the portability seam for `crates/devices` + product firmware. **Do not remove robustness or
+  abstraction to save graphics footprint** — they're independent. Restored 2026-09-02.
 - **Trimming the stack is discretionary — the timing doesn't matter either way.** Not urgent, not
   blocked on budget (we're fine at ~23.5 KB of 64 KB); do it whenever convenient. Removes ~16 KB and
   makes diag near-FR2433-viable (15.5 KB). It's cleanup, not a gate on anything.
@@ -114,7 +137,8 @@ The banner/stats build (27,018 B) is built but **not yet flashed** at last note.
 - **UCA0 UART:** TX=P1.4, RX=P1.5 (`P1SELx=01`) → eZ-FET backchannel.
 - **GPIO in use:** **P2.5 = IS31 SDB** (drive high to enable), **P2.4 = RCWL radar OUT** (GPIO in +
   pulldown, 2 kΩ series). Product-intent ADC: **P1.6=VSOM, P1.7=CHARGE** (`connections.toml`).
-  On the LaunchPad silk: LED1=P1.0, P1.1=TMP235, P1.6=S1, P2.3=S2, P2.0/2.1=crystal.
+  LaunchPad (SLAU802): LED1=P1.0, TMP235=P1.1, **S1=P4.0, S2=P2.3** (NOT P1.6 — earlier silk guess
+  was wrong), S3=RST, P2.0/2.1=crystal. diag uses only S1 (one-button cycle).
 - SFR addresses: WDTCTL 0x01CC, PM5CTL0 0x0130, P1OUT 0x0202/DIR 0x0204/SEL0 0x020A,
   P2OUT 0x0203/DIR 0x0205/SEL0 0x020B, UCB0CTLW0 0x0540/BRW 0x0546/I2CSA 0x0560/IFG 0x056C,
   UCA0CTLW0 0x0500/BRW 0x0506/MCTLW 0x0508/IFG 0x051C, CSCTL1 0x0182/2 0x0184/3 0x0186/4 0x0188/7 0x018E.
@@ -133,9 +157,12 @@ The banner/stats build (27,018 B) is built but **not yet flashed** at last note.
 
 ## Open items / backlog
 
-- [ ] **Restore the POST** on the board (`just diag run`) when done with the stress ROM.
-- [ ] **MC6470**: verify chip-ID registers vs datasheet → add WHO_AM_I + an accel **gravity-sanity**
-      exercise (|a| ≈ 1 g at rest) — cheapest high-signal functional check on the board.
+- [ ] **Map the full 64 KB FRAM** (`diag/memory.x` ROM is only the lower 32 KB, 0x8000–0xFF7F).
+      Needs the large memory model (20-bit far addressing) + split ROM regions; verify the msp430
+      Rust target supports `-mlarge` and that flashing upper FRAM (0x10000+) works. **Unblocks
+      restoring the graphics stack without any trim** (chose option B — defer, not rushed). Timebox
+      an investigation before committing.
+- [ ] **MC6470**: verify chip-ID registers vs datasheet → add WHO_AM_I (gravity-sanity done).
 - [ ] **VL53L0X**: range-a-target exercise (mm + status), beyond ID-only.
 - [ ] **Rail ADC** (VSOM P1.6 / CHARGE P1.7) + thresholds — the supervisor's core health check;
       also unlocks the thermal/power stress rung.

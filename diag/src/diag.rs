@@ -2,7 +2,7 @@
 //! presence and WHO_AM_I. Add a device with one line in `DEVICES`. Reported over UART, with a
 //! pass/fail glyph on the LED matrix when present.
 
-use crate::{i2c, is31, oled, uart};
+use crate::{i2c, is31, uart};
 use msp430fr2476::Peripherals;
 
 // 8x8 status glyphs (orientation may be mirrored/rotated on real hardware; fix once seen).
@@ -200,7 +200,9 @@ fn t_gravity(p: &Peripherals) -> Outcome {
     }
 }
 
-pub fn run(p: &Peripherals) {
+/// Run the POST test bag once. Returns `(ok, present, total)` for the caller to publish to the UI
+/// (the OLED is owned by `UiTask` now, not drawn here). `ok` = no test FAILED (skips don't fail).
+pub fn run(p: &Peripherals) -> (bool, u16, u16) {
     // The build stamp rides on every banner (not just the boot line) so the verifier — or a
     // technician who attached the monitor late — can confirm which firmware is running within
     // one ~3 s cycle. `env!` resolves it from build.rs's DIAG_BUILD at compile time.
@@ -237,21 +239,9 @@ pub fn run(p: &Peripherals) {
     }
     uart::puts(p, "\n");
 
-    // Visual verdict on every display present. OK = no test FAILED (skips don't fail). Each write's
-    // PASS/FAIL + a bus-level probe are reported so we can see which write (if any) wedges the bus.
+    // LED-matrix verdict (the OLED is rendered by UiTask from the returned verdict). OK = no test
+    // FAILED (skips don't fail). The bus-level probe after the write catches a wedged bus.
     let ok = fail == 0;
-    uart::puts(p, "display:\n");
-    uart::puts(p, "  OLED ");
-    uart::puts(
-        p,
-        match oled::show_status(p, ok, pass, pass + fail + skip) {
-            oled::Status::Ok => "rendered",
-            oled::Status::InitFail => "init FAILED",
-            oled::Status::FlushFail => "flush FAILED",
-        },
-    );
-    uart::puts(p, "\n");
-    bus_lvl(p, "  bus after OLED: ");
     if is31::present(p) {
         let i = is31::init(p);
         let s = is31::show(p, if ok { &GLYPH_CHECK } else { &GLYPH_CROSS });
@@ -262,6 +252,7 @@ pub fn run(p: &Peripherals) {
         uart::puts(p, "\n");
         bus_lvl(p, "  bus after IS31: ");
     }
+    (ok, pass, pass + fail + skip)
 }
 
 /// One-line SDA/SCL pad level (P1IN reflects the real line even when the pins are muxed to eUSCI).
