@@ -1,134 +1,91 @@
-# MSP430 I2C Firmware
+# msp-fw
 
-The firmware must provide the following features
+MSP430 firmware for the Thepia **bob-929 / ziloo** hardware — a low-power **supervisor + I/O
+extender** that monitors rails/signals while the main board sleeps and exposes its GPIO to a host
+over I²C.
 
-- I/O Expander PCA9698-like API exposed on I2C (Stem)
-- Event driven runtime using interrupts
-- Reset/Init setting up the firmware runtime
-- Docker build container Debian based that runs the build script
-- I can modify and recompile the init/configuration with a common code editor
-- Written in C, C++ or Rust
+The current focus is [`diag/`](diag/) — a Rust power-on self-test (POST) that scans the I²C sensor
+bus and exercises each known device. Production part is the **FR2433**; the **FR2476** is the dev
+board and the battery/rail-monitoring variant.
 
-You will create a GitHub repo for building and flashing firmware on a MSP430FR2476 evaluation board.
-The build will output a binary image and be able to also flash the development board via USB.
-The build is made to run from a shell on Unix.
+> New here? Read [TOOLCHAIN.md](TOOLCHAIN.md) (tooling) and [diag/DESIGN.md](diag/DESIGN.md) (the
+> firmware model). Pin assignments live in [crates/bsp/connections.toml](crates/bsp/connections.toml).
 
-Init function can configure
-- The USI pins used for I2C port to listen on
-- The I2C address to respond to
-- Initial register values
-- Register callback for reading custom register
-- Pins for Stem 1-Wire Messaging
+## Prerequisites
 
-The firmware will ultimately be written in Rust using [msp430_rt](https://docs.rs/msp430-rt/0.2.4/msp430_rt/),
-with the initial version potentially being written in C or C++.
+- **Docker** — builds run inside a pinned Linux toolchain image (msp430-gcc + Rust nightly). On
+  Apple Silicon that image is amd64 under emulation.
+- **`just`** — the command runner.
+- **Flashing (macOS host):** a one-time `mspdebug` setup (x86_64 mspdebug + signed
+  `libmsp430.dylib`) from the **msp430-macos-dev** skill. USB never goes through Docker.
 
-- [MSP430 timer sample code](https://embedded.fm/blog/ese101-msp430-timer-example)
-- [Voltage monitor sample code](https://training.ti.com/msp430-housekeeping-voltage-monitor)
-- [ADC wake and transmit on threshold](https://training.ti.com/msp-mcu-training-adc-wake-and-transmit-english?context=1147398-1147608-1147442)
-- [Alternative I2C lib](https://github.com/jwr/msp430_usi_i2c)
-- [MSP430 I2C Concepts](https://dev.ti.com/tirex/explore/node?node=A__AN8bTD5cSL1aI5MBrThs3A__com.ti.MSP430_ACADEMY__bo90bso__LATEST)
-- [Decoding a Two-Wire SPI-esque Serial Protocol](https://electronics.stackexchange.com/questions/325075/decoding-a-two-wire-spi-esque-serial-protocol)
+## Build
 
+```sh
+just bootstrap        # once: build the toolchain image locally
+just diag build       # build diag/ in the container (canonical)
+just check deps       # verify the toolchain
+```
 
-:[Hardware](HARDWARE.md)
+Builds run in the container on a host and **natively in CI** (the recipe detects `/.dockerenv`), so
+local and CI run the exact same code.
 
-:[Firmware API](FIRMWARE-API.md)
+**Faster local loop (optional, macOS):** build natively instead of under emulation. One-time
+`bash scripts/setup-native-macos.sh`, then `just diag build-native` (add `fast` for the no-LTO
+profile). It's segregated — never your system `rustc`; check with `just diag doctor`. Docker stays
+canonical for anything released. Detail in [TOOLCHAIN.md](TOOLCHAIN.md#native-macos-build-optional-segregated).
 
-:[I2C API](I2C-API.md)
+## Flash
 
-:[Linux Device Support](LINUX-SUPPORT.md)
+```sh
+just diag run         # build + flash + VERIFY the running firmware reports the stamp  ← everyday command
+just diag flash       # flash the last build (no rebuild); 'just diag flash fast' for the fast profile
+just monitor          # watch the 9600 8N1 backchannel UART (auto-detects the port)
+just usb status       # diagnose the eZ-FET USB if it drops off (hub/latch/short)
+```
 
-:[Stem MSG](STEM-MSG.md)
+`just diag run` closes the "did my flash actually take?" gap — it stamps the build, flashes, then
+reads the UART and refuses to succeed until it sees that exact stamp come back.
 
+## Versioning
 
-## Upwork task
+**There is no release system yet — every build is a dev build.** Firmware identity is a stamp
+(`DIAG_BUILD`) baked in by [diag/build.rs](diag/build.rs) and printed on every POST banner, so the
+board announces exactly what it's running:
 
-MSP430 PCA9698 compatible I/O Expander, Voltage meter and I2C Proxy
+```
+[<target>/]<year>.<release>-<short-hash>[-dirty][.<secs>]
+```
 
-The project is split in 3 milestones. First a basic I/O Expander, Second Voltage metering and Interrupts, 
-Thirdly Messaging with 1-Wire UART logic. The firmware must build in on Raspberry Pi using CD/CI.
-Texas Instruments has a demo App for Voltage Metering and I/O Expander.
-A simple hardware test setup that runs a Python Unit Test on the Raspberry Pi must show it to be working.
+- **Today** (single FR2476 dev build): `2026.dev-59ad941-dirty.1725540000`.
+- **`<target>`** is the real axis of variation — the chip/config variant (FR2433 vs FR2476,
+  role/placement), kept to a few targets and FRAM-size-constrained, with the firmware autodetecting
+  finer placement at boot. Set via `DIAG_TARGET` once the board crate builds per chip.
+- **`<release>`** is `dev` until a release process sets a number (`DIAG_RELEASE=1` → `2026.1-59ad941`).
+- Not semver — the crate `version` in Cargo.toml is unused by the firmware.
 
-You should already have existing MSP430 LaunchPad and Raspberry Pi boards to work with.
-I can send you specific boards, but I will need them back at the end of the project.
-I expect a robust initial implementation with room for further development.
+CI ([.github/workflows/hil.yml](.github/workflows/hil.yml)) builds the `diag` ELF in the toolchain
+image (the canonical build; native is iteration-only), then a self-hosted runner with a board runs
+`just diag hil`: it flashes and asserts over UART that the POST reports the stamp, all expected
+devices are present, and nothing is FAULTY. Reproduce locally:
 
-Later enhancements will include voltage monitoring, multi-MCU coordination, event messaging, slave sensors and rewriting in Rust.
+```sh
+just diag run                                     # build + flash + confirm the stamp
+EXPECT_STAMP=$(git rev-parse HEAD) just diag hil  # full HIL assertion against the board
+```
 
-Tests are run on the Raspberry Pi. Python would be a good choice.
-They could be written as Python unit tests that logs progress to the console.
+The toolchain image is published to GHCR by
+[.github/workflows/toolchain-image.yml](.github/workflows/toolchain-image.yml); set
+`MSP430_IMAGE=ghcr.io/experientials/msp430-toolchain:latest` to skip `just bootstrap`.
 
-Once you are ready to work on the project I will invite you to collaborate on a GitHub repository, where all code and notes 
-should be kept.
+## Layout
 
-Show past work
-
-- Show past work on tweaking I2C slaves and UART logic in MCU firmware
-- Show past work of low power, async, event/timer driven MCU firmware
-- How would you build a firmware in Rust and Test it with a Raspberry Pi?
-- Show past experience with Device Drivers and Apps on Zephyr RTOS
-- Show past experience with MSP430 firmware
-- Show past work with implementing I2C slave firmware
-- Show past work measuring voltage
-- Show past experience with Rust on MCUs
-- Have you worked with GitHub and GitHub actions before?
-
-
-## Milestone 1
-
-Implement firmware that supports input and output registers and pins along the lines of the PCA9698 API.
-Support Device ID I2C call.
-No support for SMBAlert, GPIO All Call.
-
-Verify the implementation in hardware by running test scripts on Raspberry Pi.
-How many changes can it handle?
-Provide firmware source/binary in Git repo.
-Provide test script and setup in Git repo.
-Provide build setup in Git repo.
-
-
-## Milestone 2
-
-Support reading voltage levels as VSOM and CHANGE registers.
-
-Trigger interrupt pin when port input changes like PCA9698.
-Queue port change event/message when input changes.
-Update test script to saturate interrupt triggering.
-How many interrupts can it handle?
-
-
-## Milestone 3
-
-STEM MSG is monitored to determine when sending is allowed.
-Implement sending STEM MSG from the event queue when STEM MSG is free.
-
-Implement Voltage threshold monitor.
-
-Test it with two MSP430 attached. They should compete to send notifications to the master.
-The Raspberry Pi is the master.
-How many interrupt notifications can it handle?
-
-
-## Milestone 4
-
-Implement Zephyr RTOS demo application using standard Device Drivers to I/O with the MSP430 using the Stem I2C API.
-
-Implement test script to run on Zephyr nRF52832 or 52840 which saturates the I2C API with read/write calls.
-Trigger interrupts, input and output GPIO pins on the MSP430.
-
-Implement GitHub Action to run tests on a Raspberry Pi build slave.
-
-
-## Milestone 5
-
-Support the GPIO All Call functionality
-
-Support SMBAlert command.
-
-Support persisted address & register states
-
-Support update the init code using an I2C command
-
-
+| Path | What |
+|---|---|
+| [`diag/`](diag/) | Rust POST / diagnostic firmware (current focus) |
+| [`pac/`](pac/) | Vendored svd2rust PACs (`msp430fr2433`, `msp430fr2476`) |
+| [`crates/bsp/connections.toml`](crates/bsp/connections.toml) | Single source of truth for pins/signals |
+| [`examples/`](examples/) | `hello-c`, `hello-rust` — toolchain smoke tests |
+| [`justfile`](justfile) + `*.just` | Command runner (`diag`, `pac`, `usb`, `example`, `check`) |
+| [`docker/Dockerfile`](docker/Dockerfile) | The one amd64 toolchain image |
+| [`scripts/`](scripts/) | Build/setup/PAC logic (recipes stay thin) |

@@ -12,6 +12,11 @@ image    := env_var_or_default("MSP430_IMAGE", "msp430-c-rust:local")
 mspdebug := env_var_or_default("MSPDEBUG_BIN", "/usr/local/bin/mspdebug")
 libdir   := env_var_or_default("MSP430_LIBDIR", "/usr/local/lib")
 
+# Persistent cargo caches (named docker volumes) so the registry index + downloaded crates survive
+# `--rm` container runs — otherwise every build re-downloads crates.io (image CARGO_HOME=/opt/cargo).
+# Mounts only the data subdirs, so the image's cargo/rust binaries in /opt/cargo aren't shadowed.
+cargo_cache := "-v msp430-cargo-registry:/opt/cargo/registry -v msp430-cargo-git:/opt/cargo/git"
+
 # build diag (Rust). Native inside the image; Docker-wrapped on a host.
 # `-e DIAG_BUILD` forwards the caller's stamp INTO the container so the firmware carries the
 # exact value `run` will verify. Unset -> build.rs derives one from git + time (see build.rs).
@@ -21,18 +26,41 @@ build:
     if [ -f /.dockerenv ]; then
         ( cd diag && cargo build --release && msp430-elf-size target/msp430-none-elf/release/diag )
     else
-        docker run --rm --platform linux/amd64 -e DIAG_BUILD -v "$PWD":/work -w /work {{image}} just diag build
+        docker run --rm --platform linux/amd64 -e DIAG_BUILD {{cargo_cache}} -v "$PWD":/work -w /work {{image}} just diag build
     fi
+
+# Fast-iteration build: no LTO (see diag/Cargo.toml [profile.fast]). LTO is the bulk of the emulated
+# (amd64-on-arm64) build time, so this is much quicker for the edit→flash loop. Flash it with
+# `just diag flash fast`. Falls back to `just diag build` if the no-LTO image overflows 32 KB ROM.
+build-fast:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f /.dockerenv ]; then
+        ( cd diag && cargo build --profile fast && msp430-elf-size target/msp430-none-elf/fast/diag )
+    else
+        docker run --rm --platform linux/amd64 -e DIAG_BUILD {{cargo_cache}} -v "$PWD":/work -w /work {{image}} just diag build-fast
+    fi
+
+# Native, SEGREGATED build (no amd64 emulation) — uses the dedicated toolchain from
+# scripts/setup-native-macos.sh, never the system rustc. `profile` = release (default) or fast.
+# Docker `just diag build` stays canonical for release/CI; this is the fast local alternative.
+build-native profile="release":
+    scripts/native-build.sh {{profile}}
+
+# Verify the native toolchain is correctly segregated (pinned nightly reachable, NOT system default).
+doctor:
+    scripts/doctor.sh
 
 # Note: stress is no longer a separate build — it's a runtime task selected from the OLED menu
 # (S1 opens the menu, S2 cycles to "I2C MARGIN"/"I2C SOAK", S1 selects). One unified `just diag run`.
 
-# flash diag's built ELF to the connected board (host; needs msp430-macos-dev setup)
-flash:
+# flash diag's built ELF to the connected board (host; needs msp430-macos-dev setup).
+# `profile` selects which build to flash: "release" (default) or "fast" (`just diag build-fast`).
+flash profile="release":
     #!/usr/bin/env bash
     set -euo pipefail
-    elf="diag/target/msp430-none-elf/release/diag"
-    [ -f "$elf" ] || { echo "no built ELF — run 'just diag build' first" >&2; exit 1; }
+    elf="diag/target/msp430-none-elf/{{profile}}/diag"
+    [ -f "$elf" ] || { echo "no built ELF at $elf — run 'just diag build' (or build-fast) first" >&2; exit 1; }
     echo "flashing $elf"
     # Clear a stale FET holder first: a lingering mspdebug (or a `just diag run`/`just monitor`
     # that didn't release) makes tilib fail with "No unused FET found". Cheap self-heal.

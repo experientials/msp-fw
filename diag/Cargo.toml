@@ -18,3 +18,12 @@ embedded-hal = "1.0"
 [profile.release]
 opt-level = "s"
 lto = true
+
+# Fast-iteration profile: identical size-opt (opt-level "s", inherited) but NO LTO. LTO is the
+# dominant cost of the emulated amd64-on-arm64 build (a one-crate recompile took ~10 min, almost
+# all of it the LTO link), so dropping it slashes the edit→flash loop. Larger than release; if it
+# overflows memory.x's 32 KB ROM window, fall back to `just diag build` (LTO release). Use via
+# `just diag build-fast` + `just diag flash fast`.
+[profile.fast]
+inherits = "release"
+lto = false

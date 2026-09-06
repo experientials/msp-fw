@@ -26,6 +26,7 @@ mod is31;
 mod mc6470;
 mod rcwl;
 mod regs;
+mod si7021;
 mod ssd1306_raw;
 mod stress;
 mod tasks;

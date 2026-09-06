@@ -64,3 +64,18 @@ pub fn dec(p: &Peripherals, mut v: u16) {
         putc(p, buf[i]);
     }
 }
+
+/// Signed hundredths as a fixed-point decimal, e.g. `-1234 -> "-12.34"`. For sensor values kept
+/// as centi-units (no float on msp430): temperature in centi-°C, humidity in centi-%RH.
+pub fn fixed2(p: &Peripherals, centi: i32) {
+    let mut v = centi;
+    if v < 0 {
+        putc(p, b'-');
+        v = -v;
+    }
+    dec(p, (v / 100) as u16); // integer part (≤ a few hundred here) fits u16
+    putc(p, b'.');
+    let f = (v % 100) as u16;
+    putc(p, b'0' + (f / 10) as u8);
+    putc(p, b'0' + (f % 10) as u8);
+}
