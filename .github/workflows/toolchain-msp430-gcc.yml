@@ -47,21 +47,34 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      # Cache the built toolchain, keyed on the build script — so iterating on later steps (or a
+      # re-run) skips the ~15-min compile. Saves even if a later step fails, as long as the build did.
+      - name: Cache toolchain
+        id: gcc-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/msp430-gcc
+          key: msp430-gcc-9.3.1-${{ matrix.arch }}-${{ hashFiles('scripts/build-msp430-gcc.sh') }}
       - name: Build msp430-elf-gcc (${{ matrix.arch }})
+        if: steps.gcc-cache.outputs.cache-hit != 'true'
         run: PREFIX=/opt/msp430-gcc JOBS="$(nproc)" bash scripts/build-msp430-gcc.sh
       - name: Smoke test — compile + link with libgcc / mul_none
         # Fails the job (no artifact, no release) if the toolchain can't do what the firmware needs:
         # compile for msp430 and link the mul_none libgcc multilib (`-lmul_none -lgcc`). The mul()
         # call forces a libgcc __mulhi reference, so a missing multilib fails at link, not silently.
         run: |
+          set -x
           export PATH=/opt/msp430-gcc/bin:$PATH
-          msp430-elf-gcc -print-multi-lib | grep -q mul_none || { echo "mul_none multilib missing"; exit 1; }
+          # Diagnostics: where the multiply-support + libgcc archives landed (they must be on the
+          # default link path for `-lmul_none -lgcc` to resolve, as the firmware relies on).
+          find /opt/msp430-gcc \( -name 'libmul_*.a' -o -name 'libgcc.a' \) | head
           cat > /tmp/link.ld <<'EOF'
           MEMORY { ram (rwx) : ORIGIN = 0x2000, LENGTH = 0x0800 }
           SECTIONS { .text : { *(.text*) } > ram  .rodata : { *(.rodata*) } > ram
                      .data : { *(.data*) } > ram  .bss : { *(.bss*) } > ram }
           EOF
           printf 'int mul(int a,int b){return a*b;}\nint main(void){return mul(3,4);}\n' > /tmp/t.c
+          # The real gate: compile for msp430 and link the mul_none libgcc the firmware needs.
           msp430-elf-gcc -mcpu=msp430 -Os -nostartfiles -T /tmp/link.ld /tmp/t.c -lmul_none -lgcc -o /tmp/t.elf
           msp430-elf-size /tmp/t.elf
       - name: Package
