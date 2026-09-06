@@ -23,9 +23,11 @@ TI_BASE="https://software-dl.ti.com/msp430/msp430_public_sw/mcu/msp430/MSPGCC/9_
 PATCHES_TB="msp430-gcc-9.3.1.11-source-patches.tar.bz2"
 SUPPORT_ZIP="msp430-gcc-support-files-1.212.zip"
 
-# sudo only if we can't write PREFIX's parent ourselves (CI runs as a user with passwordless sudo;
-# a rootless container may already own /opt).
-SUDO=""; [ -w "$(dirname "$PREFIX")" ] || SUDO="sudo"
+# Privileged ops (apt-get, make install to /opt) need root. Use sudo unless we're already root;
+# fall back to no-sudo if there's no sudo binary (then apt/install must already be permitted).
+if [ "$(id -u)" = 0 ]; then SUDO=""
+elif command -v sudo >/dev/null 2>&1; then SUDO="sudo"
+else SUDO=""; fi
 
 install_deps() {
   command -v apt-get >/dev/null || return 0
