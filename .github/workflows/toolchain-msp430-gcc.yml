@@ -1,0 +1,90 @@
+name: msp430-gcc toolchain
+
+# Build msp430-elf-gcc from source for Linux and publish per-arch tarballs as a GitHub Release, so
+# bench/build nodes fetch instead of compiling. This exists mainly for **arm64 / Raspberry Pi**,
+# which TI ships no prebuilt for; the x86_64 build is a convenience (TI also ships that one).
+# Run manually when the gcc / TI-patch version bumps. Real logic lives in scripts/build-msp430-gcc.sh.
+#
+# COST APPROVAL: paying for the GitHub-hosted **arm64** runner (`ubuntu-24.04-arm`) on this
+# repo is APPROVED by the owner (Henrik, henrik@thepia.net) on 2026-09-06. It's a manual,
+# infrequent job (once per gcc version) with a 90-min timeout and concurrency cap, so the spend is a
+# few cents per run. Monitor via the org Actions usage/billing page; keep a spending limit set.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish assets under"
+        default: "msp430-gcc-9.3.1"
+  # TEMPORARY (remove before merge to main): lets us iterate the from-source build on a branch —
+  # every push to it that touches these paths re-runs the build. workflow_dispatch is the real entry.
+  push:
+    branches: [ci/msp430-gcc-toolchain]
+    paths:
+      - .github/workflows/toolchain-msp430-gcc.yml
+      - scripts/build-msp430-gcc.sh
+
+permissions:
+  contents: write   # create/upload the Release + assets via GITHUB_TOKEN (no third-party actions)
+
+# Cost guard: never run two toolchain builds at once (a re-dispatch cancels the in-flight one).
+concurrency:
+  group: msp430-gcc-toolchain
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-*-arm on a PRIVATE repo bills per-minute (paid arm64 runner); FREE on public repos.
+          # This job is manual + rare (once per gcc version), so the spend is a few cents per run.
+          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+          - { runner: ubuntu-24.04,     arch: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    # Hard ceiling so a hung compile can't burn paid minutes. A clean build is ~30–45 min.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build msp430-elf-gcc (${{ matrix.arch }})
+        run: PREFIX=/opt/msp430-gcc JOBS="$(nproc)" bash scripts/build-msp430-gcc.sh
+      - name: Smoke test — compile + link with libgcc / mul_none
+        # Fails the job (no artifact, no release) if the toolchain can't do what the firmware needs:
+        # compile for msp430 and link the mul_none libgcc multilib (`-lmul_none -lgcc`). The mul()
+        # call forces a libgcc __mulhi reference, so a missing multilib fails at link, not silently.
+        run: |
+          export PATH=/opt/msp430-gcc/bin:$PATH
+          msp430-elf-gcc -print-multi-lib | grep -q mul_none || { echo "mul_none multilib missing"; exit 1; }
+          cat > /tmp/link.ld <<'EOF'
+          MEMORY { ram (rwx) : ORIGIN = 0x2000, LENGTH = 0x0800 }
+          SECTIONS { .text : { *(.text*) } > ram  .rodata : { *(.rodata*) } > ram
+                     .data : { *(.data*) } > ram  .bss : { *(.bss*) } > ram }
+          EOF
+          printf 'int mul(int a,int b){return a*b;}\nint main(void){return mul(3,4);}\n' > /tmp/t.c
+          msp430-elf-gcc -mcpu=msp430 -Os -nostartfiles -T /tmp/link.ld /tmp/t.c -lmul_none -lgcc -o /tmp/t.elf
+          msp430-elf-size /tmp/t.elf
+      - name: Package
+        run: tar -C /opt -cJf "msp430-elf-gcc-9.3.1-linux-${{ matrix.arch }}.tar.xz" msp430-gcc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msp430-elf-gcc-${{ matrix.arch }}
+          path: "*.tar.xz"
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag || 'msp430-gcc-9.3.1' }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" \
+                 --notes "msp430-elf-gcc 9.3.1 (binutils 2.34 + gcc 9.3.0 + newlib 2.4.0 + TI patches) for Linux."
+          gh release upload "$TAG" dist/*.tar.xz --repo "$GITHUB_REPOSITORY" --clobber
