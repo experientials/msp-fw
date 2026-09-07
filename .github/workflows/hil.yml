@@ -25,6 +25,11 @@ concurrency:
   group: msp430-bench
   cancel-in-progress: false
 
+env:
+  # Toolchain image base predates glibc 2.28 (needed by GitHub's Node 24 action runtime); fall back
+  # to Node 20 so JS actions run inside the container. See firmware.yml for the durable fix.
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest # x86_64 → the toolchain image runs native (no emulation)
