@@ -154,6 +154,10 @@ impl StressTask {
             cx.st_phase = 1;
             cx.st_max = 0;
             cx.st_khz = LADDER[0].khz;
+            cx.prog_tot = LADDER.len() as u8; // "N of 5" progress
+            cx.prog_cur = 1;
+            cx.err_nack = 0;
+            cx.err_corrupt = 0;
         }
         if self.li >= LADDER.len() {
             // Sweep finished on its own → return to POST (one-button model: a completed test goes
@@ -164,6 +168,9 @@ impl StressTask {
             return Some(200);
         }
         cx.st_khz = LADDER[self.li].khz;
+        cx.prog_cur = (self.li + 1) as u8;
+        cx.err_nack = self.nack as u32; // errors at the current clock step
+        cx.err_corrupt = self.corrupt as u32;
         let mut budget = MARGIN_BATCH;
         while budget > 0 {
             budget -= 1;
@@ -252,7 +259,8 @@ impl StressTask {
         cx.st_secs = secs;
         cx.st_txn_m = self.tot.txn_m;
         cx.st_txn = self.tot.txn;
-        cx.st_err = self.tot.nack + self.tot.corrupt;
+        cx.err_nack = self.tot.nack;
+        cx.err_corrupt = self.tot.corrupt;
         Some(1)
     }
 }

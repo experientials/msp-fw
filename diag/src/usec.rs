@@ -23,3 +23,17 @@ pub fn start(p: &Peripherals) {
 pub fn now(p: &Peripherals) -> u16 {
     p.ta0.ta0r().read().bits()
 }
+
+/// Busy-wait `us` microseconds (≤ 65535, i.e. under one TA0 wrap). Polls tightly so it never
+/// misses the wrap. Used for sensor conversion waits (e.g. the Si7021 no-hold RH conversion).
+pub fn delay_us(p: &Peripherals, us: u16) {
+    let start = now(p);
+    while now(p).wrapping_sub(start) < us {}
+}
+
+/// Busy-wait `ms` milliseconds, in 1 ms chunks so each stays under the 65.5 ms TA0 wrap.
+pub fn delay_ms(p: &Peripherals, ms: u16) {
+    for _ in 0..ms {
+        delay_us(p, 1000);
+    }
+}

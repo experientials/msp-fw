@@ -288,3 +288,59 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
     }
     true
 }
+
+/// Pointer-less receiver read: START(R) + read `buf.len()` bytes + STOP. No register write first —
+/// for devices that return a result to a bare read (Si7021 no-hold measurement result, the
+/// electronic-ID / firmware-rev sequences). Same bounded/self-healing contract as `read_reg`'s
+/// receive phase: never hangs, returns false on NACK or timeout.
+pub fn read(p: &Peripherals, addr: u8, buf: &mut [u8]) -> bool {
+    if buf.is_empty() {
+        return false;
+    }
+    if !sda_high(p) {
+        recover(p);
+    }
+    p.e_usci_b0.ucb0i2csa().write(|w| unsafe { w.bits(addr as u16) });
+    p.e_usci_b0
+        .ucb0ifg()
+        .modify(|r, w| unsafe { w.bits(r.bits() & !(UCNACKIFG | UCRXIFG0)) });
+    // Receiver (UCTR=0) + START.
+    p.e_usci_b0
+        .ucb0ctlw0()
+        .modify(|r, w| unsafe { w.bits((r.bits() & !UCTR) | UCTXSTT) });
+    let len = buf.len();
+    for i in 0..len {
+        if i == len - 1 {
+            // Last byte (also the only byte when len==1): wait for the address to clear, then arm
+            // NACK+STOP so the eUSCI NACKs the final byte and releases the bus.
+            let mut n = 0u16;
+            while ctlw0(p) & UCTXSTT != 0 {
+                n += 1;
+                if n >= SPIN {
+                    stop(p);
+                    return false;
+                }
+            }
+            p.e_usci_b0
+                .ucb0ctlw0()
+                .modify(|r, w| unsafe { w.bits(r.bits() | UCTXSTP) });
+        }
+        let mut n = 0u16;
+        while ifg(p) & UCRXIFG0 == 0 {
+            n += 1;
+            if n >= SPIN {
+                stop(p);
+                return false;
+            }
+        }
+        buf[i] = p.e_usci_b0.ucb0rxbuf().read().bits() as u8;
+    }
+    let mut n = 0u16;
+    while ctlw0(p) & UCTXSTP != 0 {
+        n += 1;
+        if n >= SPIN {
+            break;
+        }
+    }
+    true
+}

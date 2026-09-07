@@ -26,6 +26,7 @@ mod is31;
 mod mc6470;
 mod rcwl;
 mod regs;
+mod si7021;
 mod ssd1306_raw;
 mod stress;
 mod tasks;
@@ -167,7 +168,7 @@ fn main() -> ! {
         let mut cx = tasks::Cx::new(&p);
         let mut radar = tasks::RadarTask::new();
         let mut prox = tasks::ProximityTask::new();
-        let mut post = tasks::PostTask;
+        let mut post = tasks::PostTask::new();
         let mut btn = tasks::ButtonTask::new();
         let mut ui = tasks::UiTask::new();
         let mut stress = stress::StressTask::new();

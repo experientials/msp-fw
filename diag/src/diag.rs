@@ -2,7 +2,7 @@
 //! presence and WHO_AM_I. Add a device with one line in `DEVICES`. Reported over UART, with a
 //! pass/fail glyph on the LED matrix when present.
 
-use crate::{i2c, is31, uart};
+use crate::{i2c, is31, si7021, uart};
 use msp430fr2476::Peripherals;
 
 // 8x8 status glyphs (orientation may be mirrored/rotated on real hardware; fix once seen).
@@ -31,6 +31,9 @@ static DEVICES: &[Dev] = &[
     Dev { name: "MC6470 accel  ", addr: 0x4C, id_reg: NO_ID, id_val: 0x00 },
     Dev { name: "MC6470 mag    ", addr: 0x0C, id_reg: NO_ID, id_val: 0x00 },
     Dev { name: "IS31FL3730 LED", addr: 0x60, id_reg: NO_ID, id_val: 0x00 },
+    // Si7021 T/RH — presence-only here (its part-number ID is a multi-byte command sequence, not a
+    // single-register WHO_AM_I). The `Si7021 T/RH` test reads the real values + identifies the part.
+    Dev { name: "Si7021 T/RH   ", addr: 0x40, id_reg: NO_ID, id_val: 0x00 },
 ];
 
 /// Is this address one of our expected devices? A scan hit that isn't = config drift.
@@ -136,7 +139,7 @@ fn check_devices(p: &Peripherals) -> (u16, u16, u16) {
 /// change the run order**; a future button menu / script selects a subset. This is diag's "bag of
 /// tests" — distinct from the continuous `sched::Task`s (radar/proximity), which run over time
 /// rather than once-to-a-verdict.
-enum Outcome {
+pub enum Outcome {
     Pass,
     Fail,
     /// Device absent / not applicable — reported, does NOT fail the verdict. This is how an
@@ -154,6 +157,7 @@ static TESTS: &[Test] = &[
     Test { name: "bus scan", run: t_scan },
     Test { name: "device inventory", run: t_devices },
     Test { name: "MC6470 gravity", run: t_gravity },
+    Test { name: "Si7021 T/RH", run: t_temphum },
 ];
 
 /// Bus scan + config-drift: Fail if any unexpected address ACKed.
@@ -200,30 +204,89 @@ fn t_gravity(p: &Peripherals) -> Outcome {
     }
 }
 
-/// Run the POST test bag once. Returns `(ok, present, total)` for the caller to publish to the UI
-/// (the OLED is owned by `UiTask` now, not drawn here). `ok` = no test FAILED (skips don't fail).
-pub fn run(p: &Peripherals) -> (bool, u16, u16) {
-    // The build stamp rides on every banner (not just the boot line) so the verifier — or a
-    // technician who attached the monitor late — can confirm which firmware is running within
-    // one ~3 s cycle. `env!` resolves it from build.rs's DIAG_BUILD at compile time.
+/// Si7021 temperature + humidity — read the REAL values. Triggers a no-hold RH measurement, reads
+/// it back with a CRC-8 check, pulls temperature from the same acquisition, and identifies the part
+/// (SNB_3 = 0x15). Skip when absent (optional device); Fail only if a present sensor gives a bad CRC
+/// or an out-of-envelope reading (a plausible number that fails CRC is worse than a missing one).
+fn t_temphum(p: &Peripherals) -> Outcome {
+    if !si7021::present(p) {
+        uart::puts(p, "  Si7021: absent (skip)\n");
+        return Outcome::Skip;
+    }
+    if let Some(id) = si7021::part_id(p) {
+        uart::puts(p, "  part=0x");
+        uart::hex8(p, id);
+        uart::puts(p, if id == si7021::PART_SI7021 {
+            " (Si7021)"
+        } else {
+            " (HTU21/SHT21 family?)" // 0xF5/0xF3 shared; only 0x40+values must be right
+        });
+        if let Some(rev) = si7021::firmware_rev(p) {
+            uart::puts(p, " fw=0x");
+            uart::hex8(p, rev);
+        }
+        uart::puts(p, "\n");
+    }
+    match si7021::measure(p) {
+        Some(r) => {
+            uart::puts(p, "  T=");
+            uart::fixed2(p, r.temp_c_centi);
+            uart::puts(p, " C  RH=");
+            uart::fixed2(p, r.rh_centi);
+            uart::puts(p, " %  crc ");
+            uart::puts(p, if r.crc_ok { "OK\n" } else { "BAD\n" });
+            // Verdict: CRC must pass and both values within the sensor's operating envelope
+            // (-40..+125 °C, 0..100 %RH). Catches a live-but-garbling bus, not just a NACK.
+            let sane = r.crc_ok
+                && r.temp_c_centi > -4000
+                && r.temp_c_centi < 12500
+                && (0..=10000).contains(&r.rh_centi);
+            if sane {
+                Outcome::Pass
+            } else {
+                Outcome::Fail
+            }
+        }
+        None => {
+            uart::puts(p, "  Si7021 read FAILED\n");
+            Outcome::Fail
+        }
+    }
+}
+
+// The POST test bag is driven cooperatively by `tasks::PostTask` — one test per scheduler tick — so
+// the OLED can show `DIAG N of M` live and the ~1.5 s scan no longer hogs the loop. These are the
+// pieces it orchestrates:
+
+/// Number of tests in the bag.
+pub fn test_count() -> usize {
+    TESTS.len()
+}
+
+/// Run test `i` (prints its own section header + body) and return its outcome.
+pub fn run_test(p: &Peripherals, i: usize) -> Outcome {
+    uart::puts(p, "· "); // section header names the test (the registry identifier)
+    uart::puts(p, TESTS[i].name);
+    uart::puts(p, "\n");
+    (TESTS[i].run)(p)
+}
+
+/// The current test's short name (for the OLED progress line).
+pub fn test_name(i: usize) -> &'static str {
+    TESTS[i].name
+}
+
+/// POST banner with the build stamp — printed once at the start of each pass. `env!` resolves it
+/// from build.rs's DIAG_BUILD, so a technician who attached the monitor late can confirm the running
+/// firmware within one cycle.
+pub fn banner(p: &Peripherals) {
     uart::puts(p, "\n=== bob-929 diag POST · build ");
     uart::puts(p, env!("DIAG_BUILD"));
     uart::puts(p, " ===\n");
-    // Run the ordered test bag; each test prints its own section, here we tally the verdicts.
-    // `missing`/`UNEXPECTED`/`FAULTY` detail is printed inside the individual tests. Continuous
-    // radar/proximity sensing is NOT here — it lives in sched::Tasks.
-    let (mut pass, mut fail, mut skip) = (0u16, 0u16, 0u16);
-    for t in TESTS {
-        uart::puts(p, "· "); // section header names the test (the registry identifier a menu selects)
-        uart::puts(p, t.name);
-        uart::puts(p, "\n");
-        match (t.run)(p) {
-            Outcome::Pass => pass += 1,
-            Outcome::Fail => fail += 1,
-            Outcome::Skip => skip += 1,
-        }
-    }
+}
 
+/// The summary line at the end of a pass.
+pub fn summary(p: &Peripherals, pass: u16, fail: u16, skip: u16) {
     uart::puts(p, "summary: ");
     uart::dec(p, pass);
     uart::puts(p, " passed");
@@ -238,10 +301,11 @@ pub fn run(p: &Peripherals) -> (bool, u16, u16) {
         uart::puts(p, " skipped");
     }
     uart::puts(p, "\n");
+}
 
-    // LED-matrix verdict (the OLED is rendered by UiTask from the returned verdict). OK = no test
-    // FAILED (skips don't fail). The bus-level probe after the write catches a wedged bus.
-    let ok = fail == 0;
+/// LED-matrix verdict glyph (the OLED is rendered by UiTask). `ok` = no test FAILED. The bus-level
+/// probe after the write catches a wedged bus.
+pub fn led_verdict(p: &Peripherals, ok: bool) {
     if is31::present(p) {
         let i = is31::init(p);
         let s = is31::show(p, if ok { &GLYPH_CHECK } else { &GLYPH_CROSS });
@@ -252,7 +316,6 @@ pub fn run(p: &Peripherals) -> (bool, u16, u16) {
         uart::puts(p, "\n");
         bus_lvl(p, "  bus after IS31: ");
     }
-    (ok, pass, pass + fail + skip)
 }
 
 /// One-line SDA/SCL pad level (P1IN reflects the real line even when the pins are muxed to eUSCI).
