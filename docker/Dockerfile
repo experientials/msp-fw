@@ -15,8 +15,10 @@ ARG MSP430_GCC_REPO=experientials/msp-fw
 ARG MSP430_GCC_TAG=msp430-gcc-9.3.1
 ARG MSP430_GCC_ASSET=msp430-elf-gcc-9.3.1-linux-x86_64.tar.xz
 
+# build-essential (not just gcc) — Rust proc-macro/build-script deps (quote/syn) link HOST binaries
+# and need the C runtime (Scrt1.o/crti.o/libc), which lives in libc6-dev. `make` builds the C example.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl ca-certificates xz-utils git make gcc \
+      curl ca-certificates xz-utils git make build-essential \
  && rm -rf /var/lib/apt/lists/*
 
 # Our msp430-elf-gcc 9.3.1 (public repo → release asset needs no auth). Extracts to /opt/msp430-gcc,
