@@ -9,13 +9,6 @@ on:
   push:
   pull_request:
 
-env:
-  # The toolchain image's base predates glibc 2.28, which GitHub's new Node 24 action runtime
-  # requires — so checkout/upload-artifact (JS actions) can't run inside the container. Fall back to
-  # Node 20, which does run on the older glibc. Stopgap: Node 20 is itself being retired, so the
-  # durable fix is rebuilding the toolchain image on a newer base (glibc ≥ 2.28).
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
-
 jobs:
   build:
     runs-on: ubuntu-latest              # x86_64 runner → image runs native (no emulation)
