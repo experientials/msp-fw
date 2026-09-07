@@ -46,12 +46,12 @@ jobs:
     # Hard ceiling so a hung compile can't burn paid minutes. A clean build is ~30–45 min.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Cache the built toolchain, keyed on the build script — so iterating on later steps (or a
       # re-run) skips the ~15-min compile. Saves even if a later step fails, as long as the build did.
       - name: Cache toolchain
         id: gcc-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /opt/msp430-gcc
           key: msp430-gcc-9.3.1-${{ matrix.arch }}-${{ hashFiles('scripts/build-msp430-gcc.sh') }}
@@ -79,7 +79,7 @@ jobs:
           msp430-elf-size /tmp/t.elf
       - name: Package
         run: tar -C /opt -cJf "msp430-elf-gcc-9.3.1-linux-${{ matrix.arch }}.tar.xz" msp430-gcc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: msp430-elf-gcc-${{ matrix.arch }}
           path: "*.tar.xz"
@@ -88,7 +88,7 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
