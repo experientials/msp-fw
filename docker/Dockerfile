@@ -1,12 +1,14 @@
 # MSP430 C + Rust toolchain image.
 #
-# Base: debian:bookworm (glibc 2.36). The old cdelledonne/msp430-gcc base had glibc < 2.28, which
-# GitHub Actions' Node 20/24 runtime can't run — every JS action (checkout, upload-artifact) failed
-# inside the container with "GLIBC_2.28 not found". A modern base fixes that at the root.
+# Base: ubuntu:24.04 (glibc 2.39). Two glibc constraints must both be met:
+#   • GitHub Actions' Node 20/24 runtime needs glibc >= 2.28 (the old cdelledonne base failed this
+#     with "GLIBC_2.28 not found", breaking checkout/upload-artifact inside the container);
+#   • our msp430-elf-gcc is built on ubuntu-24.04 (toolchain-msp430-gcc.yml), so its binary needs
+#     glibc >= 2.38. Matching the base to the build runner (ubuntu:24.04) satisfies both.
 #
 # msp430-elf-gcc: OUR reproducible 9.3.1 build, fetched from the GitHub Release that
 # toolchain-msp430-gcc.yml publishes — so CI, the release, and local dev all run the SAME toolchain.
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 
 ARG RUST_TOOLCHAIN=nightly-2025-06-25          # keep in sync with diag/rust-toolchain.toml
 ARG MSP430_GCC_REPO=experientials/msp-fw
