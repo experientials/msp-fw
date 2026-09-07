@@ -43,10 +43,26 @@ rustup toolchain install "$tc" --profile minimal --component rust-src --no-self-
 rustup run "$tc" rustc --version
 
 # --- 2) install the native msp430-elf-gcc linker (uniquely-named cross-tool) -----------------------
-if ! command -v msp430-elf-gcc >/dev/null; then
-  echo "== installing msp430-elf-gcc (tgtakaoka tap) =="
+# The tgtakaoka tap formulae have two bugs on modern macOS (neither is a compiler/Xcode issue — no
+# Xcode upgrade needed; see the skill's macos-setup.md):
+#   BUG1: they build info docs needing `makeinfo` (absent on macOS) → binutils dies at bfd.info.
+#         The docs are deleted anyway, so we patch `make` → `make MAKEINFO=true` to skip them.
+#   BUG2: the binutils formula writes into /opt/homebrew/lib (outside its keg) → Homebrew's build
+#         SANDBOX EPERMs → we install with HOMEBREW_NO_SANDBOX=1.
+# The formula edits are local (a `brew update` reverts them) but the built keg persists.
+if ! command -v msp430-elf-gcc >/dev/null 2>&1; then
+  echo "== installing msp430-elf-gcc (tgtakaoka tap, ~20-40 min from source) =="
   brew tap tgtakaoka/msp430-elf
-  brew install gcc-msp430-elf gdb-msp430-elf
+  brew trust tgtakaoka/msp430-elf 2>/dev/null || true
+  tapdir="$(brew --repo tgtakaoka/msp430-elf)"
+  for f in binutils-msp430-elf gcc-msp430-elf; do
+    rb="$tapdir/$f.rb"
+    if [ -f "$rb" ] && ! grep -q 'MAKEINFO=true' "$rb"; then   # idempotent
+      sed -i '' -e 's/system "make", "install"/system "make", "install", "MAKEINFO=true"/' \
+                -e 's/system "make"$/system "make", "MAKEINFO=true"/' "$rb"
+    fi
+  done
+  HOMEBREW_NO_SANDBOX=1 brew install --build-from-source gcc-msp430-elf gdb-msp430-elf
 fi
 echo "linker: $(command -v msp430-elf-gcc) -> $(msp430-elf-gcc --version | head -1)"
 
@@ -57,7 +73,7 @@ echo "== native smoke build: examples/hello-rust =="
 cat <<EOF
 
 ✅ Native toolchain ready — segregated in $store (NOT the system default).
-   Build:  just diag build-native            (add 'fast' for the no-LTO profile)
+   Build:  just diag build                   (native once set up; 'just diag dev' = fast build+flash)
    Check:  just diag doctor                  (verifies segregation held)
    Flash:  just diag flash                   (unchanged; msp430-macos-dev skill, Rosetta mspdebug)
    Docker build ('just diag build') is untouched and remains canonical for release/CI.

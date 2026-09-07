@@ -23,7 +23,7 @@ lto = true
 # dominant cost of the emulated amd64-on-arm64 build (a one-crate recompile took ~10 min, almost
 # all of it the LTO link), so dropping it slashes the edit→flash loop. Larger than release; if it
 # overflows memory.x's 32 KB ROM window, fall back to `just diag build` (LTO release). Use via
-# `just diag build-fast` + `just diag flash fast`.
+# `just diag build fast` (or `just diag dev`, which also flashes).
 [profile.fast]
 inherits = "release"
 lto = false

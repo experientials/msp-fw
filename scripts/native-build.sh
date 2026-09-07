@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Native, SEGREGATED diag build — no Docker/amd64 emulation. Invoked by `just diag build-native`.
+# Native, SEGREGATED diag build — no Docker/amd64 emulation. Invoked by `just diag build` (native
+# path) and `just diag dev`.
 #
 # The pinned nightly is used ONLY through the dedicated RUSTUP_HOME/CARGO_HOME below; this never
 # touches ~/.rustup and never becomes the system default rustc. Docker remains the canonical build

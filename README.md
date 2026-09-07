@@ -22,18 +22,20 @@ board and the battery/rail-monitoring variant.
 ## Build
 
 ```sh
-just bootstrap        # once: build the toolchain image locally
-just diag build       # build diag/ in the container (canonical)
+just bootstrap        # once: build the toolchain image locally (only needed for the Docker path)
+just diag build       # build diag/ — native if set up, else the Docker image
 just check deps       # verify the toolchain
 ```
 
-Builds run in the container on a host and **natively in CI** (the recipe detects `/.dockerenv`), so
-local and CI run the exact same code.
+`just diag build` auto-selects the fastest path: the **native** toolchain if it's installed (no
+emulation), otherwise the **Docker** image; inside CI it builds in-container. Override with
+`just diag build docker|native|fast|docker-fast`. This only sets the LOCAL default — shipped
+artifacts are always built on CI.
 
-**Faster local loop (optional, macOS):** build natively instead of under emulation. One-time
-`bash scripts/setup-native-macos.sh`, then `just diag build-native` (add `fast` for the no-LTO
-profile). It's segregated — never your system `rustc`; check with `just diag doctor`. Docker stays
-canonical for anything released. Detail in [TOOLCHAIN.md](TOOLCHAIN.md#native-macos-build-optional-segregated).
+**Faster local loop (macOS/Linux):** one-time `bash scripts/setup-native-macos.sh` installs the
+native toolchain (segregated — never your system `rustc`; check with `just diag doctor`). After that
+`just diag build` is native, and **`just diag dev`** is the sub-minute build+flash inner loop.
+Detail in [TOOLCHAIN.md](TOOLCHAIN.md#native-macos-build-optional-segregated).
 
 ## Flash
 

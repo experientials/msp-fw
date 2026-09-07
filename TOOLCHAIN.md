@@ -72,7 +72,9 @@ for release/CI.
   a native `msp430-elf-gcc` (Homebrew, tgtakaoka tap). **Segregated by design:** it never writes
   `~/.rustup`, never runs `rustup default`, and never shadows your system `rustc` — the nightly is
   reached only through the recipes below.
-- **Build:** `just diag build-native` (add `fast` for the no-LTO profile → `just diag build-native fast`).
+- **Build:** once set up, plain `just diag build` auto-selects native (Docker only when the native
+  toolchain is absent). `just diag dev` = fast native build + flash (the inner loop); `just diag
+  build fast` is a native no-LTO build on its own.
 - **Verify segregation:** `just diag doctor` — asserts the pinned nightly is reachable *and* is not
   your system default.
 - **Flash:** unchanged (`just diag flash`) — still the host-side Rosetta `mspdebug` from the
@@ -81,7 +83,8 @@ for release/CI.
 Reproducibility note: native `msp430-elf-gcc` (Homebrew tap, **9.3.x**) differs from the Docker
 image's msp430-gcc **8.3**, so native and container `.elf`s won't be byte-identical. Treat the
 **Docker/CI build as canonical** for released artifacts; native is for iteration. `just diag
-build-fast` remains the in-Docker no-LTO option when you want container parity without the LTO cost.
+`just diag build docker-fast` remains the in-Docker no-LTO option when you want container parity
+without the LTO cost.
 
 ## Notes on the toolchains
 
