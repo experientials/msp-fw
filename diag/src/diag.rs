@@ -2,7 +2,11 @@
 //! presence and WHO_AM_I. Add a device with one line in `DEVICES`. Reported over UART, with a
 //! pass/fail glyph on the LED matrix when present.
 
-use crate::{i2c, is31, si7021, uart};
+use crate::hal::EusciI2c;
+use crate::{i2c, is31, uart};
+use devices::mc6470::{Mc6470, ADDR as MC6470_ADDR};
+use devices::si7021::{Si7021, ADDR as SI7021_ADDR, PART_SI7021};
+use devices::{Device, Error};
 use msp430fr2476::Peripherals;
 
 // 8x8 status glyphs (orientation may be mirrored/rotated on real hardware; fix once seen).
@@ -193,14 +197,41 @@ fn t_devices(p: &Peripherals) -> Outcome {
 
 /// MC6470 accel gravity-sanity (|a| ~ 1 g). Skip when absent (optional device), else Pass/Fail.
 fn t_gravity(p: &Peripherals) -> Outcome {
-    if !i2c::probe(p, crate::mc6470::ACCEL_ADDR) {
+    // Same shared driver prod uses (devices::mc6470) over diag's embedded-hal bus seam — no fork.
+    let mut bus = EusciI2c::new(p);
+    if !devices::present(&mut bus, MC6470_ADDR) {
         uart::puts(p, "  MC6470 accel: absent (skip)\n");
         return Outcome::Skip;
     }
-    match crate::mc6470::gravity_check(p) {
-        Some(true) => Outcome::Pass,
-        Some(false) => Outcome::Fail,
-        None => Outcome::Skip, // not woken yet (cold-boot latency) — self-corrects next pass
+    uart::puts(p, "  MC6470 accel: ");
+    match Mc6470::measure(&mut bus) {
+        Ok(a) => {
+            uart::puts(p, "x=");
+            uart::dec_i16(p, a.x);
+            uart::puts(p, " y=");
+            uart::dec_i16(p, a.y);
+            uart::puts(p, " z=");
+            uart::dec_i16(p, a.z);
+            uart::puts(p, " |a|=");
+            uart::dec(p, a.magnitude_mg() as u16);
+            uart::puts(p, "mg ");
+            if a.is_gravity() {
+                uart::puts(p, "OK\n");
+                Outcome::Pass
+            } else {
+                uart::puts(p, "OUT-OF-RANGE\n");
+                Outcome::Fail
+            }
+        }
+        // Not woken yet (cold-boot wake latency) — self-corrects next pass; skip, don't false-FAIL.
+        Err(Error::NotReady) => {
+            uart::puts(p, "not ready (wake latency), skip\n");
+            Outcome::Skip
+        }
+        Err(_) => {
+            uart::puts(p, "enable/read FAILED\n");
+            Outcome::Fail
+        }
     }
 }
 
@@ -209,26 +240,28 @@ fn t_gravity(p: &Peripherals) -> Outcome {
 /// (SNB_3 = 0x15). Skip when absent (optional device); Fail only if a present sensor gives a bad CRC
 /// or an out-of-envelope reading (a plausible number that fails CRC is worse than a missing one).
 fn t_temphum(p: &Peripherals) -> Outcome {
-    if !si7021::present(p) {
+    // Same shared driver prod uses (devices::si7021) over diag's embedded-hal bus seam — no fork.
+    let mut bus = EusciI2c::new(p);
+    if !devices::present(&mut bus, SI7021_ADDR) {
         uart::puts(p, "  Si7021: absent (skip)\n");
         return Outcome::Skip;
     }
-    if let Some(id) = si7021::part_id(p) {
+    if let Ok(id) = Si7021::part_id(&mut bus) {
         uart::puts(p, "  part=0x");
         uart::hex8(p, id);
-        uart::puts(p, if id == si7021::PART_SI7021 {
+        uart::puts(p, if id == PART_SI7021 {
             " (Si7021)"
         } else {
             " (HTU21/SHT21 family?)" // 0xF5/0xF3 shared; only 0x40+values must be right
         });
-        if let Some(rev) = si7021::firmware_rev(p) {
+        if let Ok(rev) = Si7021::firmware_rev(&mut bus) {
             uart::puts(p, " fw=0x");
             uart::hex8(p, rev);
         }
         uart::puts(p, "\n");
     }
-    match si7021::measure(p) {
-        Some(r) => {
+    match Si7021::measure(&mut bus) {
+        Ok(r) => {
             uart::puts(p, "  T=");
             uart::fixed2(p, r.temp_c_centi);
             uart::puts(p, " C  RH=");
@@ -247,7 +280,7 @@ fn t_temphum(p: &Peripherals) -> Outcome {
                 Outcome::Fail
             }
         }
-        None => {
+        Err(_) => {
             uart::puts(p, "  Si7021 read FAILED\n");
             Outcome::Fail
         }

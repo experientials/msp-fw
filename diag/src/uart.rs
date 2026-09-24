@@ -65,6 +65,16 @@ pub fn dec(p: &Peripherals, mut v: u16) {
     }
 }
 
+/// Signed decimal (`dec` is unsigned). Accel axes are ±8191, so `-v` never overflows i16.
+pub fn dec_i16(p: &Peripherals, v: i16) {
+    if v < 0 {
+        putc(p, b'-');
+        dec(p, (-v) as u16);
+    } else {
+        dec(p, v as u16);
+    }
+}
+
 /// Signed hundredths as a fixed-point decimal, e.g. `-1234 -> "-12.34"`. For sensor values kept
 /// as centi-units (no float on msp430): temperature in centi-°C, humidity in centi-%RH.
 pub fn fixed2(p: &Peripherals, centi: i32) {

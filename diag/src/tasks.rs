@@ -9,7 +9,9 @@
 //! accumulates a motion window that [`PostTask`] reports and clears every ~3 s — so a trigger
 //! that falls between POST passes is no longer missed.
 
-use crate::{apds, buttons, diag, rcwl, ssd1306_raw as ssd, uart};
+use crate::hal::EusciI2c;
+use crate::{buttons, diag, rcwl, ssd1306_raw as ssd, uart};
+use devices::{apds9960::Apds9960, Device};
 use msp430fr2476::Peripherals;
 use sched::Task;
 
@@ -168,28 +170,37 @@ impl<'a> Task<Cx<'a>> for ProximityTask {
             cx.apds_prox = None;
             return Some(Self::RETRY_MS);
         }
+        // Same shared driver prod uses (devices::apds9960) over diag's embedded-hal bus seam —
+        // no forked per-sensor code. `enable` once, then non-blocking `sample` the free-runner.
+        let mut bus = EusciI2c::new(cx.p);
         if !self.enabled {
-            if apds::enable(cx.p) {
+            if Apds9960::enable(&mut bus).is_ok() {
                 self.enabled = true;
             } else {
                 cx.apds_prox = None; // still absent — back off
                 return Some(Self::RETRY_MS);
             }
         }
-        match apds::proximity(cx.p) {
-            Some(v) => {
+        match Apds9960::sample(&mut bus) {
+            Ok(Some(v)) => {
                 cx.apds_prox = Some(v);
                 Some(Self::RATE_MS)
             }
-            None => {
-                // None is either "sample not ready yet" or "gone" — probe to tell them apart.
+            // Not valid this instant, or gone — probe to tell them apart (as before).
+            Ok(None) => {
                 cx.apds_prox = None;
-                if apds::present(cx.p) {
+                if devices::present(&mut bus, Apds9960::ADDR) {
                     Some(Self::RATE_MS) // present, just not valid this instant
                 } else {
                     self.enabled = false; // unplugged — re-init when it returns
                     Some(Self::RETRY_MS)
                 }
+            }
+            // Bus error (NACK / stuck) — treat as gone and re-arm enable when it returns.
+            Err(_) => {
+                cx.apds_prox = None;
+                self.enabled = false;
+                Some(Self::RETRY_MS)
             }
         }
     }

@@ -62,9 +62,29 @@ impl<'a> I2c<SevenBitAddress> for EusciI2c<'a> {
                         return Err(Error::Bus);
                     }
                 }
-                Operation::Read(_) => return Err(Error::Unsupported),
+                // Bare read (no register pointer) — e.g. the Si7021 no-hold result / ID sequences.
+                Operation::Read(buf) => {
+                    if !crate::i2c::read(self.p, addr, buf) {
+                        return Err(Error::Bus);
+                    }
+                }
             }
         }
         Ok(())
+    }
+
+    /// Register read — the `[Write(&[reg]), Read]` shape the shared `crates/devices` drivers use,
+    /// mapped to the repeated-START `i2c::read_reg` so the write→read is one transfer with no STOP
+    /// between (as sensors require). Only a 1-byte register pointer is supported (all current
+    /// devices). Mirrors prod/src/hal.rs — the seam is identical on both consumers.
+    fn write_read(&mut self, addr: u8, write: &[u8], read: &mut [u8]) -> Result<(), Self::Error> {
+        if write.len() != 1 {
+            return Err(Error::Unsupported);
+        }
+        if crate::i2c::read_reg(self.p, addr, write[0], read) {
+            Ok(())
+        } else {
+            Err(Error::Bus)
+        }
     }
 }

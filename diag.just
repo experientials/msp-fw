@@ -27,13 +27,20 @@ cargo_cache := "-v msp430-cargo-registry:/opt/cargo/registry -v msp430-cargo-git
 # NOTE: this is only the LOCAL default for convenience — shipped artifacts are always built on CI
 # (see .github/workflows/hil.yml). `-e DIAG_BUILD` forwards the caller's stamp into the container;
 # on the native path build.rs picks it up from the inherited env (unset -> derives from git+time).
+# FR2476 (diag's dev part): 64 KB program FRAM / 8 KB SRAM physically, but the msp430 Rust/gcc
+# toolchain links only the lower 32 KB FRAM window without the large-memory model — so 32 KB is the
+# practical code ceiling here. (On-MCU A/B self-update, which would also have capped images at 32 KB,
+# is a non-driver now — see prod/DESIGN.md.) Product firmware targets the smaller FR2433 (prod/, gated
+# at 15 KB). The gate reports headroom; memory.x hard-stops an over-window build.
 build mode="auto":
     #!/usr/bin/env bash
     set -euo pipefail
+    FRAM_BUDGET=32768; RAM_BUDGET=8192; STACK_FLOOR=1024   # FR2476 8 KB SRAM; reserve ≥1 KB for stack
     # Inside the toolchain container (CI, or our own docker path): build here; profile from mode.
     if [ -f /.dockerenv ]; then
         case "{{mode}}" in *fast) prof=fast; flag="--profile fast";; *) prof=release; flag="--release";; esac
-        ( cd diag && cargo build $flag && msp430-elf-size "target/msp430-none-elf/$prof/diag" )
+        ( cd diag && cargo build $flag )
+        scripts/size-check.sh "diag/target/msp430-none-elf/$prof/diag" "$FRAM_BUDGET" "$RAM_BUDGET" "diag ($prof, FR2476)" "$STACK_FLOOR"
         exit 0
     fi
     run_docker() { docker run --rm --platform linux/amd64 -e DIAG_BUILD {{cargo_cache}} -v "$PWD":/work -w /work {{image}} just diag build "$1"; }
@@ -43,8 +50,8 @@ build mode="auto":
         else mode=docker; echo "· native toolchain not found → Docker (set it up: scripts/setup-native-macos.sh)"; fi
     fi
     case "$mode" in
-        native)      scripts/native-build.sh release ;;
-        fast)        scripts/native-build.sh fast ;;
+        native)      scripts/native-build.sh release diag; scripts/size-check.sh "diag/target/msp430-none-elf/release/diag" "$FRAM_BUDGET" "$RAM_BUDGET" "diag (release, FR2476)" "$STACK_FLOOR" ;;
+        fast)        scripts/native-build.sh fast diag;    scripts/size-check.sh "diag/target/msp430-none-elf/fast/diag"    "$FRAM_BUDGET" "$RAM_BUDGET" "diag (fast, FR2476)" "$STACK_FLOOR" ;;
         docker)      run_docker docker ;;
         docker-fast) run_docker docker-fast ;;
         *) echo "unknown mode '$mode' — use auto|native|fast|docker|docker-fast" >&2; exit 1 ;;

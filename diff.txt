@@ -1,0 +1,1585 @@
+diff --git a/.claude/skills/msp-fw-dev-workspace/iteration-1/feedback.json b/.claude/skills/msp-fw-dev-workspace/iteration-1/feedback.json
+index c129415..ed95eef 100644
+--- a/.claude/skills/msp-fw-dev-workspace/iteration-1/feedback.json
++++ b/.claude/skills/msp-fw-dev-workspace/iteration-1/feedback.json
+@@ -3,7 +3,12 @@
+     {
+       "run_id": "eval-0-flash-diag-with_skill",
+       "feedback": "Builds runs on Linux. For macOS and Windows it runs in Docker container. For CI it runs on a Linux node. For Raspberry Pi it runs native.\nComms over USB with the device runs in Host OS.\njust usb will check and advise resolution of USB issues.\n\nNo absolute paths, relative and URLs to GitHub static content.",
+-      "timestamp": "2026-08-30T19:00:13.105Z"
++      "timestamp": "2026-09-05T09:53:20.464Z"
++    },
++    {
++      "run_id": "eval-0-flash-diag-without_skill",
++      "feedback": "boostrap sounds like boot sequence `just setup` seems better\n",
++      "timestamp": "2026-09-05T09:53:20.464Z"
+     }
+   ],
+   "status": "in_progress"
+diff --git a/.github/workflows/toolchain-image.yml b/.github/workflows/toolchain-image.yml
+index e68facf..2f8a373 100644
+--- a/.github/workflows/toolchain-image.yml
++++ b/.github/workflows/toolchain-image.yml
+@@ -19,6 +19,11 @@ jobs:
+     steps:
+       - uses: actions/checkout@v4
+ 
++      # Required for `cache-to/from: type=gha` below — that cache export only works on the buildx
++      # docker-container driver, not the default docker driver. Without this, build-push fails in
++      # ~12s ("Cache export is not supported for the docker driver") and the image never publishes.
++      - uses: docker/setup-buildx-action@v3
++
+       - uses: docker/login-action@v3
+         with:
+           registry: ghcr.io
+diff --git a/.github/workflows/toolchain-msp430-gcc.yml b/.github/workflows/toolchain-msp430-gcc.yml
+new file mode 100644
+index 0000000..69d8100
+--- /dev/null
++++ b/.github/workflows/toolchain-msp430-gcc.yml
+@@ -0,0 +1,103 @@
++name: msp430-gcc toolchain
++
++# Build msp430-elf-gcc from source for Linux and publish per-arch tarballs as a GitHub Release, so
++# bench/build nodes fetch instead of compiling. This exists mainly for **arm64 / Raspberry Pi**,
++# which TI ships no prebuilt for; the x86_64 build is a convenience (TI also ships that one).
++# Run manually when the gcc / TI-patch version bumps. Real logic lives in scripts/build-msp430-gcc.sh.
++#
++# COST APPROVAL: paying for the GitHub-hosted **arm64** runner (`ubuntu-24.04-arm`) on this
++# repo is APPROVED by the owner (Henrik, henrik@thepia.net) on 2026-09-06. It's a manual,
++# infrequent job (once per gcc version) with a 90-min timeout and concurrency cap, so the spend is a
++# few cents per run. Monitor via the org Actions usage/billing page; keep a spending limit set.
++
++on:
++  workflow_dispatch:
++    inputs:
++      release_tag:
++        description: "Release tag to publish assets under"
++        default: "msp430-gcc-9.3.1"
++  # TEMPORARY (remove before merge to main): lets us iterate the from-source build on a branch —
++  # every push to it that touches these paths re-runs the build. workflow_dispatch is the real entry.
++  push:
++    branches: [ci/msp430-gcc-toolchain]
++    paths:
++      - .github/workflows/toolchain-msp430-gcc.yml
++      - scripts/build-msp430-gcc.sh
++
++permissions:
++  contents: write   # create/upload the Release + assets via GITHUB_TOKEN (no third-party actions)
++
++# Cost guard: never run two toolchain builds at once (a re-dispatch cancels the in-flight one).
++concurrency:
++  group: msp430-gcc-toolchain
++  cancel-in-progress: true
++
++jobs:
++  build:
++    strategy:
++      fail-fast: false
++      matrix:
++        include:
++          # ubuntu-*-arm on a PRIVATE repo bills per-minute (paid arm64 runner); FREE on public repos.
++          # This job is manual + rare (once per gcc version), so the spend is a few cents per run.
++          - { runner: ubuntu-24.04-arm, arch: aarch64 }
++          - { runner: ubuntu-24.04,     arch: x86_64 }
++    runs-on: ${{ matrix.runner }}
++    # Hard ceiling so a hung compile can't burn paid minutes. A clean build is ~30–45 min.
++    timeout-minutes: 90
++    steps:
++      - uses: actions/checkout@v7
++      # Cache the built toolchain, keyed on the build script — so iterating on later steps (or a
++      # re-run) skips the ~15-min compile. Saves even if a later step fails, as long as the build did.
++      - name: Cache toolchain
++        id: gcc-cache
++        uses: actions/cache@v6
++        with:
++          path: /opt/msp430-gcc
++          key: msp430-gcc-9.3.1-${{ matrix.arch }}-${{ hashFiles('scripts/build-msp430-gcc.sh') }}
++      - name: Build msp430-elf-gcc (${{ matrix.arch }})
++        if: steps.gcc-cache.outputs.cache-hit != 'true'
++        run: PREFIX=/opt/msp430-gcc JOBS="$(nproc)" bash scripts/build-msp430-gcc.sh
++      - name: Smoke test — compile + link with libgcc / mul_none
++        # Fails the job (no artifact, no release) if the toolchain can't do what the firmware needs:
++        # compile for msp430 and link the mul_none libgcc multilib (`-lmul_none -lgcc`). The mul()
++        # call forces a libgcc __mulhi reference, so a missing multilib fails at link, not silently.
++        run: |
++          set -x
++          export PATH=/opt/msp430-gcc/bin:$PATH
++          # Diagnostics: where the multiply-support + libgcc archives landed (they must be on the
++          # default link path for `-lmul_none -lgcc` to resolve, as the firmware relies on).
++          find /opt/msp430-gcc \( -name 'libmul_*.a' -o -name 'libgcc.a' \) | head
++          cat > /tmp/link.ld <<'EOF'
++          MEMORY { ram (rwx) : ORIGIN = 0x2000, LENGTH = 0x0800 }
++          SECTIONS { .text : { *(.text*) } > ram  .rodata : { *(.rodata*) } > ram
++                     .data : { *(.data*) } > ram  .bss : { *(.bss*) } > ram }
++          EOF
++          printf 'int mul(int a,int b){return a*b;}\nint main(void){return mul(3,4);}\n' > /tmp/t.c
++          # The real gate: compile for msp430 and link the mul_none libgcc the firmware needs.
++          msp430-elf-gcc -mcpu=msp430 -Os -nostartfiles -T /tmp/link.ld /tmp/t.c -lmul_none -lgcc -o /tmp/t.elf
++          msp430-elf-size /tmp/t.elf
++      - name: Package
++        run: tar -C /opt -cJf "msp430-elf-gcc-9.3.1-linux-${{ matrix.arch }}.tar.xz" msp430-gcc
++      - uses: actions/upload-artifact@v7
++        with:
++          name: msp430-elf-gcc-${{ matrix.arch }}
++          path: "*.tar.xz"
++
++  publish:
++    needs: build
++    runs-on: ubuntu-24.04
++    steps:
++      - uses: actions/download-artifact@v8
++        with:
++          path: dist
++          merge-multiple: true
++      - name: Publish release assets
++        env:
++          GH_TOKEN: ${{ github.token }}
++          TAG: ${{ inputs.release_tag || 'msp430-gcc-9.3.1' }}
++        run: |
++          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
++            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" \
++                 --notes "msp430-elf-gcc 9.3.1 (binutils 2.34 + gcc 9.3.0 + newlib 2.4.0 + TI patches) for Linux."
++          gh release upload "$TAG" dist/*.tar.xz --repo "$GITHUB_REPOSITORY" --clobber
+diff --git a/README.md b/README.md
+index 83bda74..6e9d50c 100644
+--- a/README.md
++++ b/README.md
+@@ -1,134 +1,93 @@
+-# MSP430 I2C Firmware
+-
+-The firmware must provide the following features
+-
+-- I/O Expander PCA9698-like API exposed on I2C (Stem)
+-- Event driven runtime using interrupts
+-- Reset/Init setting up the firmware runtime
+-- Docker build container Debian based that runs the build script
+-- I can modify and recompile the init/configuration with a common code editor
+-- Written in C, C++ or Rust
+-
+-You will create a GitHub repo for building and flashing firmware on a MSP430FR2476 evaluation board.
+-The build will output a binary image and be able to also flash the development board via USB.
+-The build is made to run from a shell on Unix.
+-
+-Init function can configure
+-- The USI pins used for I2C port to listen on
+-- The I2C address to respond to
+-- Initial register values
+-- Register callback for reading custom register
+-- Pins for Stem 1-Wire Messaging
+-
+-The firmware will ultimately be written in Rust using [msp430_rt](https://docs.rs/msp430-rt/0.2.4/msp430_rt/),
+-with the initial version potentially being written in C or C++.
+-
+-- [MSP430 timer sample code](https://embedded.fm/blog/ese101-msp430-timer-example)
+-- [Voltage monitor sample code](https://training.ti.com/msp430-housekeeping-voltage-monitor)
+-- [ADC wake and transmit on threshold](https://training.ti.com/msp-mcu-training-adc-wake-and-transmit-english?context=1147398-1147608-1147442)
+-- [Alternative I2C lib](https://github.com/jwr/msp430_usi_i2c)
+-- [MSP430 I2C Concepts](https://dev.ti.com/tirex/explore/node?node=A__AN8bTD5cSL1aI5MBrThs3A__com.ti.MSP430_ACADEMY__bo90bso__LATEST)
+-- [Decoding a Two-Wire SPI-esque Serial Protocol](https://electronics.stackexchange.com/questions/325075/decoding-a-two-wire-spi-esque-serial-protocol)
+-
+-
+-:[Hardware](HARDWARE.md)
+-
+-:[Firmware API](FIRMWARE-API.md)
+-
+-:[I2C API](I2C-API.md)
+-
+-:[Linux Device Support](LINUX-SUPPORT.md)
+-
+-:[Stem MSG](STEM-MSG.md)
+-
+-
+-## Upwork task
+-
+-MSP430 PCA9698 compatible I/O Expander, Voltage meter and I2C Proxy
+-
+-The project is split in 3 milestones. First a basic I/O Expander, Second Voltage metering and Interrupts, 
+-Thirdly Messaging with 1-Wire UART logic. The firmware must build in on Raspberry Pi using CD/CI.
+-Texas Instruments has a demo App for Voltage Metering and I/O Expander.
+-A simple hardware test setup that runs a Python Unit Test on the Raspberry Pi must show it to be working.
+-
+-You should already have existing MSP430 LaunchPad and Raspberry Pi boards to work with.
+-I can send you specific boards, but I will need them back at the end of the project.
+-I expect a robust initial implementation with room for further development.
+-
+-Later enhancements will include voltage monitoring, multi-MCU coordination, event messaging, slave sensors and rewriting in Rust.
+-
+-Tests are run on the Raspberry Pi. Python would be a good choice.
+-They could be written as Python unit tests that logs progress to the console.
+-
+-Once you are ready to work on the project I will invite you to collaborate on a GitHub repository, where all code and notes 
+-should be kept.
+-
+-Show past work
+-
+-- Show past work on tweaking I2C slaves and UART logic in MCU firmware
+-- Show past work of low power, async, event/timer driven MCU firmware
+-- How would you build a firmware in Rust and Test it with a Raspberry Pi?
+-- Show past experience with Device Drivers and Apps on Zephyr RTOS
+-- Show past experience with MSP430 firmware
+-- Show past work with implementing I2C slave firmware
+-- Show past work measuring voltage
+-- Show past experience with Rust on MCUs
+-- Have you worked with GitHub and GitHub actions before?
+-
+-
+-## Milestone 1
+-
+-Implement firmware that supports input and output registers and pins along the lines of the PCA9698 API.
+-Support Device ID I2C call.
+-No support for SMBAlert, GPIO All Call.
+-
+-Verify the implementation in hardware by running test scripts on Raspberry Pi.
+-How many changes can it handle?
+-Provide firmware source/binary in Git repo.
+-Provide test script and setup in Git repo.
+-Provide build setup in Git repo.
+-
+-
+-## Milestone 2
+-
+-Support reading voltage levels as VSOM and CHANGE registers.
+-
+-Trigger interrupt pin when port input changes like PCA9698.
+-Queue port change event/message when input changes.
+-Update test script to saturate interrupt triggering.
+-How many interrupts can it handle?
+-
+-
+-## Milestone 3
+-
+-STEM MSG is monitored to determine when sending is allowed.
+-Implement sending STEM MSG from the event queue when STEM MSG is free.
+-
+-Implement Voltage threshold monitor.
+-
+-Test it with two MSP430 attached. They should compete to send notifications to the master.
+-The Raspberry Pi is the master.
+-How many interrupt notifications can it handle?
+-
+-
+-## Milestone 4
+-
+-Implement Zephyr RTOS demo application using standard Device Drivers to I/O with the MSP430 using the Stem I2C API.
+-
+-Implement test script to run on Zephyr nRF52832 or 52840 which saturates the I2C API with read/write calls.
+-Trigger interrupts, input and output GPIO pins on the MSP430.
+-
+-Implement GitHub Action to run tests on a Raspberry Pi build slave.
+-
+-
+-## Milestone 5
+-
+-Support the GPIO All Call functionality
+-
+-Support SMBAlert command.
+-
+-Support persisted address & register states
+-
+-Support update the init code using an I2C command
+-
+-
++# msp-fw
++
++MSP430 firmware for the Thepia **bob-929 / ziloo** hardware — a low-power **supervisor + I/O
++extender** that monitors rails/signals while the main board sleeps and exposes its GPIO to a host
++over I²C.
++
++The current focus is [`diag/`](diag/) — a Rust power-on self-test (POST) that scans the I²C sensor
++bus and exercises each known device. Production part is the **FR2433**; the **FR2476** is the dev
++board and the battery/rail-monitoring variant.
++
++> New here? Read [TOOLCHAIN.md](TOOLCHAIN.md) (tooling) and [diag/DESIGN.md](diag/DESIGN.md) (the
++> firmware model). Pin assignments live in [crates/bsp/connections.toml](crates/bsp/connections.toml).
++
++## Prerequisites
++
++- **Docker** — builds run inside a pinned Linux toolchain image (msp430-gcc + Rust nightly). On
++  Apple Silicon that image is amd64 under emulation.
++- **`just`** — the command runner.
++- **Flashing (macOS host):** a one-time `mspdebug` setup (x86_64 mspdebug + signed
++  `libmsp430.dylib`) from the **msp430-macos-dev** skill. USB never goes through Docker.
++
++## Build
++
++```sh
++just bootstrap        # once: build the toolchain image locally (only needed for the Docker path)
++just diag build       # build diag/ — native if set up, else the Docker image
++just check deps       # verify the toolchain
++```
++
++`just diag build` auto-selects the fastest path: the **native** toolchain if it's installed (no
++emulation), otherwise the **Docker** image; inside CI it builds in-container. Override with
++`just diag build docker|native|fast|docker-fast`. This only sets the LOCAL default — shipped
++artifacts are always built on CI.
++
++**Faster local loop (macOS/Linux):** one-time `bash scripts/setup-native-macos.sh` installs the
++native toolchain (segregated — never your system `rustc`; check with `just diag doctor`). After that
++`just diag build` is native, and **`just diag dev`** is the sub-minute build+flash inner loop.
++Detail in [TOOLCHAIN.md](TOOLCHAIN.md#native-macos-build-optional-segregated).
++
++## Flash
++
++```sh
++just diag run         # build + flash + VERIFY the running firmware reports the stamp  ← everyday command
++just diag flash       # flash the last build (no rebuild); 'just diag flash fast' for the fast profile
++just monitor          # watch the 9600 8N1 backchannel UART (auto-detects the port)
++just usb status       # diagnose the eZ-FET USB if it drops off (hub/latch/short)
++```
++
++`just diag run` closes the "did my flash actually take?" gap — it stamps the build, flashes, then
++reads the UART and refuses to succeed until it sees that exact stamp come back.
++
++## Versioning
++
++**There is no release system yet — every build is a dev build.** Firmware identity is a stamp
++(`DIAG_BUILD`) baked in by [diag/build.rs](diag/build.rs) and printed on every POST banner, so the
++board announces exactly what it's running:
++
++```
++[<target>/]<year>.<release>-<short-hash>[-dirty][.<secs>]
++```
++
++- **Today** (single FR2476 dev build): `2026.dev-59ad941-dirty.1725540000`.
++- **`<target>`** is the real axis of variation — the chip/config variant (FR2433 vs FR2476,
++  role/placement), kept to a few targets and FRAM-size-constrained, with the firmware autodetecting
++  finer placement at boot. Set via `DIAG_TARGET` once the board crate builds per chip.
++- **`<release>`** is `dev` until a release process sets a number (`DIAG_RELEASE=1` → `2026.1-59ad941`).
++- Not semver — the crate `version` in Cargo.toml is unused by the firmware.
++
++CI ([.github/workflows/hil.yml](.github/workflows/hil.yml)) builds the `diag` ELF in the toolchain
++image (the canonical build; native is iteration-only), then a self-hosted runner with a board runs
++`just diag hil`: it flashes and asserts over UART that the POST reports the stamp, all expected
++devices are present, and nothing is FAULTY. Reproduce locally:
++
++```sh
++just diag run                                     # build + flash + confirm the stamp
++EXPECT_STAMP=$(git rev-parse HEAD) just diag hil  # full HIL assertion against the board
++```
++
++The toolchain image is published to GHCR by
++[.github/workflows/toolchain-image.yml](.github/workflows/toolchain-image.yml); set
++`MSP430_IMAGE=ghcr.io/experientials/msp430-toolchain:latest` to skip `just bootstrap`.
++
++## Layout
++
++| Path | What |
++|---|---|
++| [`diag/`](diag/) | Rust POST / diagnostic firmware (current focus) |
++| [`pac/`](pac/) | Vendored svd2rust PACs (`msp430fr2433`, `msp430fr2476`) |
++| [`crates/bsp/connections.toml`](crates/bsp/connections.toml) | Single source of truth for pins/signals |
++| [`examples/`](examples/) | `hello-c`, `hello-rust` — toolchain smoke tests |
++| [`justfile`](justfile) + `*.just` | Command runner (`diag`, `pac`, `usb`, `example`, `check`) |
++| [`docker/Dockerfile`](docker/Dockerfile) | The one amd64 toolchain image |
++| [`scripts/`](scripts/) | Build/setup/PAC logic (recipes stay thin) |
+diff --git a/TOOLCHAIN.md b/TOOLCHAIN.md
+index 3ed926e..08a02c9 100644
+--- a/TOOLCHAIN.md
++++ b/TOOLCHAIN.md
+@@ -60,6 +60,32 @@ skip `bootstrap` and set `MSP430_IMAGE=ghcr.io/experientials/msp430-toolchain:la
+ - **firmware.yml** compiles both examples in the image and uploads the `.elf`s. Build-only —
+   no hardware in CI (flashing is local via the skill).
+ 
++## Native macOS build (optional, segregated)
++
++The default build runs the Linux toolchain in Docker — on Apple Silicon that's **amd64 under
++emulation**, which is slow (a one-crate rebuild can take minutes, mostly the LTO link). For a fast
++local loop you can build **natively** instead. It's an opt-in alternative; Docker stays canonical
++for release/CI.
++
++- **One-time:** `bash scripts/setup-native-macos.sh` — installs the pinned nightly + `rust-src` into
++  a **dedicated toolchain home** (`~/.local/share/msp430-rust`, override with `MSP430_RUST_HOME`) and
++  a native `msp430-elf-gcc` (Homebrew, tgtakaoka tap). **Segregated by design:** it never writes
++  `~/.rustup`, never runs `rustup default`, and never shadows your system `rustc` — the nightly is
++  reached only through the recipes below.
++- **Build:** once set up, plain `just diag build` auto-selects native (Docker only when the native
++  toolchain is absent). `just diag dev` = fast native build + flash (the inner loop); `just diag
++  build fast` is a native no-LTO build on its own.
++- **Verify segregation:** `just diag doctor` — asserts the pinned nightly is reachable *and* is not
++  your system default.
++- **Flash:** unchanged (`just diag flash`) — still the host-side Rosetta `mspdebug` from the
++  `msp430-macos-dev` skill (TI ships `libmsp430.dylib` x86-only, so Rosetta is mandatory there).
++
++Reproducibility note: native `msp430-elf-gcc` (Homebrew tap, **9.3.x**) differs from the Docker
++image's msp430-gcc **8.3**, so native and container `.elf`s won't be byte-identical. Treat the
++**Docker/CI build as canonical** for released artifacts; native is for iteration. `just diag
++`just diag build docker-fast` remains the in-Docker no-LTO option when you want container parity
++without the LTO cost.
++
+ ## Notes on the toolchains
+ 
+ - **C:** `msp430-elf-gcc` (msp430-gcc 8.3 in the base image) with TI device support for
+diff --git a/UPWORK-INTRO.md b/UPWORK-INTRO.md
+new file mode 100644
+index 0000000..83bda74
+--- /dev/null
++++ b/UPWORK-INTRO.md
+@@ -0,0 +1,134 @@
++# MSP430 I2C Firmware
++
++The firmware must provide the following features
++
++- I/O Expander PCA9698-like API exposed on I2C (Stem)
++- Event driven runtime using interrupts
++- Reset/Init setting up the firmware runtime
++- Docker build container Debian based that runs the build script
++- I can modify and recompile the init/configuration with a common code editor
++- Written in C, C++ or Rust
++
++You will create a GitHub repo for building and flashing firmware on a MSP430FR2476 evaluation board.
++The build will output a binary image and be able to also flash the development board via USB.
++The build is made to run from a shell on Unix.
++
++Init function can configure
++- The USI pins used for I2C port to listen on
++- The I2C address to respond to
++- Initial register values
++- Register callback for reading custom register
++- Pins for Stem 1-Wire Messaging
++
++The firmware will ultimately be written in Rust using [msp430_rt](https://docs.rs/msp430-rt/0.2.4/msp430_rt/),
++with the initial version potentially being written in C or C++.
++
++- [MSP430 timer sample code](https://embedded.fm/blog/ese101-msp430-timer-example)
++- [Voltage monitor sample code](https://training.ti.com/msp430-housekeeping-voltage-monitor)
++- [ADC wake and transmit on threshold](https://training.ti.com/msp-mcu-training-adc-wake-and-transmit-english?context=1147398-1147608-1147442)
++- [Alternative I2C lib](https://github.com/jwr/msp430_usi_i2c)
++- [MSP430 I2C Concepts](https://dev.ti.com/tirex/explore/node?node=A__AN8bTD5cSL1aI5MBrThs3A__com.ti.MSP430_ACADEMY__bo90bso__LATEST)
++- [Decoding a Two-Wire SPI-esque Serial Protocol](https://electronics.stackexchange.com/questions/325075/decoding-a-two-wire-spi-esque-serial-protocol)
++
++
++:[Hardware](HARDWARE.md)
++
++:[Firmware API](FIRMWARE-API.md)
++
++:[I2C API](I2C-API.md)
++
++:[Linux Device Support](LINUX-SUPPORT.md)
++
++:[Stem MSG](STEM-MSG.md)
++
++
++## Upwork task
++
++MSP430 PCA9698 compatible I/O Expander, Voltage meter and I2C Proxy
++
++The project is split in 3 milestones. First a basic I/O Expander, Second Voltage metering and Interrupts, 
++Thirdly Messaging with 1-Wire UART logic. The firmware must build in on Raspberry Pi using CD/CI.
++Texas Instruments has a demo App for Voltage Metering and I/O Expander.
++A simple hardware test setup that runs a Python Unit Test on the Raspberry Pi must show it to be working.
++
++You should already have existing MSP430 LaunchPad and Raspberry Pi boards to work with.
++I can send you specific boards, but I will need them back at the end of the project.
++I expect a robust initial implementation with room for further development.
++
++Later enhancements will include voltage monitoring, multi-MCU coordination, event messaging, slave sensors and rewriting in Rust.
++
++Tests are run on the Raspberry Pi. Python would be a good choice.
++They could be written as Python unit tests that logs progress to the console.
++
++Once you are ready to work on the project I will invite you to collaborate on a GitHub repository, where all code and notes 
++should be kept.
++
++Show past work
++
++- Show past work on tweaking I2C slaves and UART logic in MCU firmware
++- Show past work of low power, async, event/timer driven MCU firmware
++- How would you build a firmware in Rust and Test it with a Raspberry Pi?
++- Show past experience with Device Drivers and Apps on Zephyr RTOS
++- Show past experience with MSP430 firmware
++- Show past work with implementing I2C slave firmware
++- Show past work measuring voltage
++- Show past experience with Rust on MCUs
++- Have you worked with GitHub and GitHub actions before?
++
++
++## Milestone 1
++
++Implement firmware that supports input and output registers and pins along the lines of the PCA9698 API.
++Support Device ID I2C call.
++No support for SMBAlert, GPIO All Call.
++
++Verify the implementation in hardware by running test scripts on Raspberry Pi.
++How many changes can it handle?
++Provide firmware source/binary in Git repo.
++Provide test script and setup in Git repo.
++Provide build setup in Git repo.
++
++
++## Milestone 2
++
++Support reading voltage levels as VSOM and CHANGE registers.
++
++Trigger interrupt pin when port input changes like PCA9698.
++Queue port change event/message when input changes.
++Update test script to saturate interrupt triggering.
++How many interrupts can it handle?
++
++
++## Milestone 3
++
++STEM MSG is monitored to determine when sending is allowed.
++Implement sending STEM MSG from the event queue when STEM MSG is free.
++
++Implement Voltage threshold monitor.
++
++Test it with two MSP430 attached. They should compete to send notifications to the master.
++The Raspberry Pi is the master.
++How many interrupt notifications can it handle?
++
++
++## Milestone 4
++
++Implement Zephyr RTOS demo application using standard Device Drivers to I/O with the MSP430 using the Stem I2C API.
++
++Implement test script to run on Zephyr nRF52832 or 52840 which saturates the I2C API with read/write calls.
++Trigger interrupts, input and output GPIO pins on the MSP430.
++
++Implement GitHub Action to run tests on a Raspberry Pi build slave.
++
++
++## Milestone 5
++
++Support the GPIO All Call functionality
++
++Support SMBAlert command.
++
++Support persisted address & register states
++
++Support update the init code using an I2C command
++
++
+diff --git a/README.pdf b/UPWORK-INTRO.pdf
+similarity index 100%
+rename from README.pdf
+rename to UPWORK-INTRO.pdf
+diff --git a/diag.just b/diag.just
+index d1294a7..cac860e 100644
+--- a/diag.just
++++ b/diag.just
+@@ -1,6 +1,7 @@
+ # `just diag <verb>` — build/flash the diagnostic ROM (top-level diag/, Rust on the FR2476 PAC).
+ #
+-#   just diag build     build the ELF (in the container on a host; native in CI)
++#   just diag build     build the ELF — native if the toolchain is set up, else Docker (see `build`)
++#   just diag dev       fast native build + flash — the sub-minute inner loop
+ #   just diag flash     program the connected board (host; needs msp430-macos-dev setup)
+ #   just diag run       build + flash + VERIFY the running firmware reports the stamp we flashed
+ #
+@@ -12,27 +13,62 @@ image    := env_var_or_default("MSP430_IMAGE", "msp430-c-rust:local")
+ mspdebug := env_var_or_default("MSPDEBUG_BIN", "/usr/local/bin/mspdebug")
+ libdir   := env_var_or_default("MSP430_LIBDIR", "/usr/local/lib")
+ 
+-# build diag (Rust). Native inside the image; Docker-wrapped on a host.
+-# `-e DIAG_BUILD` forwards the caller's stamp INTO the container so the firmware carries the
+-# exact value `run` will verify. Unset -> build.rs derives one from git + time (see build.rs).
+-build:
++# Persistent cargo caches (named docker volumes) so the registry index + downloaded crates survive
++# `--rm` container runs — otherwise every build re-downloads crates.io (image CARGO_HOME=/opt/cargo).
++# Mounts only the data subdirs, so the image's cargo/rust binaries in /opt/cargo aren't shadowed.
++cargo_cache := "-v msp430-cargo-registry:/opt/cargo/registry -v msp430-cargo-git:/opt/cargo/git"
++
++# Build diag (Rust). `just diag build` picks the fastest available path:
++#   • host WITH the native toolchain (scripts/setup-native-macos.sh) → native, no emulation
++#   • host WITHOUT it                                                → Docker image (amd64)
++#   • inside the toolchain container (CI)                            → builds natively in-container
++# `mode` overrides the choice:
++#   auto (default) | native (LTO) | fast (native, no-LTO) | docker (LTO) | docker-fast (no-LTO)
++# NOTE: this is only the LOCAL default for convenience — shipped artifacts are always built on CI
++# (see .github/workflows/hil.yml). `-e DIAG_BUILD` forwards the caller's stamp into the container;
++# on the native path build.rs picks it up from the inherited env (unset -> derives from git+time).
++build mode="auto":
+     #!/usr/bin/env bash
+     set -euo pipefail
++    # Inside the toolchain container (CI, or our own docker path): build here; profile from mode.
+     if [ -f /.dockerenv ]; then
+-        ( cd diag && cargo build --release && msp430-elf-size target/msp430-none-elf/release/diag )
+-    else
+-        docker run --rm --platform linux/amd64 -e DIAG_BUILD -v "$PWD":/work -w /work {{image}} just diag build
++        case "{{mode}}" in *fast) prof=fast; flag="--profile fast";; *) prof=release; flag="--release";; esac
++        ( cd diag && cargo build $flag && msp430-elf-size "target/msp430-none-elf/$prof/diag" )
++        exit 0
++    fi
++    run_docker() { docker run --rm --platform linux/amd64 -e DIAG_BUILD {{cargo_cache}} -v "$PWD":/work -w /work {{image}} just diag build "$1"; }
++    mode="{{mode}}"
++    if [ "$mode" = auto ]; then
++        if scripts/native-available.sh; then mode=native
++        else mode=docker; echo "· native toolchain not found → Docker (set it up: scripts/setup-native-macos.sh)"; fi
+     fi
++    case "$mode" in
++        native)      scripts/native-build.sh release ;;
++        fast)        scripts/native-build.sh fast ;;
++        docker)      run_docker docker ;;
++        docker-fast) run_docker docker-fast ;;
++        *) echo "unknown mode '$mode' — use auto|native|fast|docker|docker-fast" >&2; exit 1 ;;
++    esac
++
++# Inner dev loop: fast native build (no-LTO) + flash. Sub-minute edit→running once native is set up.
++dev:
++    just diag build fast
++    just diag flash fast
++
++# Verify the native toolchain is correctly segregated (pinned nightly reachable, NOT system default).
++doctor:
++    scripts/doctor.sh
+ 
+ # Note: stress is no longer a separate build — it's a runtime task selected from the OLED menu
+ # (S1 opens the menu, S2 cycles to "I2C MARGIN"/"I2C SOAK", S1 selects). One unified `just diag run`.
+ 
+-# flash diag's built ELF to the connected board (host; needs msp430-macos-dev setup)
+-flash:
++# flash diag's built ELF to the connected board (host; needs msp430-macos-dev setup).
++# `profile` selects which build to flash: "release" (default) or "fast" (`just diag build fast`).
++flash profile="release":
+     #!/usr/bin/env bash
+     set -euo pipefail
+-    elf="diag/target/msp430-none-elf/release/diag"
+-    [ -f "$elf" ] || { echo "no built ELF — run 'just diag build' first" >&2; exit 1; }
++    elf="diag/target/msp430-none-elf/{{profile}}/diag"
++    [ -f "$elf" ] || { echo "no built ELF at $elf — run 'just diag build' (or 'just diag build fast') first" >&2; exit 1; }
+     echo "flashing $elf"
+     # Clear a stale FET holder first: a lingering mspdebug (or a `just diag run`/`just monitor`
+     # that didn't release) makes tilib fail with "No unused FET found". Cheap self-heal.
+diff --git a/diag/Cargo.toml b/diag/Cargo.toml
+index 3175925..1885093 100644
+--- a/diag/Cargo.toml
++++ b/diag/Cargo.toml
+@@ -18,3 +18,12 @@ embedded-hal = "1.0"
+ [profile.release]
+ opt-level = "s"
+ lto = true
++
++# Fast-iteration profile: identical size-opt (opt-level "s", inherited) but NO LTO. LTO is the
++# dominant cost of the emulated amd64-on-arm64 build (a one-crate recompile took ~10 min, almost
++# all of it the LTO link), so dropping it slashes the edit→flash loop. Larger than release; if it
++# overflows memory.x's 32 KB ROM window, fall back to `just diag build` (LTO release). Use via
++# `just diag build fast` (or `just diag dev`, which also flashes).
++[profile.fast]
++inherits = "release"
++lto = false
+diff --git a/diag/build.rs b/diag/build.rs
+index 07eaba5..05eeed7 100644
+--- a/diag/build.rs
++++ b/diag/build.rs
+@@ -1,45 +1,88 @@
+-//! Emits `DIAG_BUILD` — a short stamp compiled into the firmware and printed in the POST
+-//! banner. It exists to kill one specific ambiguity: "is the board actually running the build
+-//! I just flashed, or a stale image?" The running firmware announces its own identity over the
+-//! UART, so you can *see* the answer instead of guessing.
++//! Emits `DIAG_BUILD` — the firmware's identity stamp, compiled in and printed in the POST banner.
++//! It exists to kill one specific ambiguity: "is the board running the build I just flashed, or a
++//! stale image?" The firmware announces its own identity over the UART, so you can *see* the answer.
+ //!
+-//! `just diag run` pins this via the `DIAG_BUILD` env var (a fresh, unique value per run) and
+-//! then verifies that exact string comes back on the wire. A bare `cargo build` has no pin, so
+-//! we derive one from `git` + build time instead — still unique enough to tell two builds apart.
++//! Format: `[<target>/]<year>.<release>-<short-hash>[-dirty][.<secs>]`
++//! (e.g. `2026.dev-59ad941-dirty.1725540000`, or `fr2433/2026.1-59ad941` once we build per chip)
++//!   <target>  build target — the chip/config variant (FR2433 vs FR2476, role/placement), from
++//!             `DIAG_TARGET`. **Omitted today**: one FR2476 dev build. This is the real axis of
++//!             variation (kept few, FRAM-size-constrained); the firmware autodetects finer
++//!             placement at boot. The board crate will set it when we build a config per chip.
++//!   <year>    build year (UTC).
++//!   <release> `DIAG_RELEASE` when set (a real release), else `dev`. There is **no release system
++//!             yet** — every build is a dev build until a release process sets this to a number.
++//!   -dirty    the working tree had uncommitted changes.
++//!   .<secs>   dev builds only, so rebuilding the same (dirty) tree still yields a distinct stamp —
++//!             the stale-firmware check in `just diag run` needs every build to differ. A real
++//!             release is immutable (target + release + commit already make it unique), so it's omitted.
++//!
++//! `just diag run` / CI may pin a unique suffix via the `DIAG_BUILD` env var; we prefix the
++//! target+version onto it. `DIAG_VERSION` (`<year>.<release>`) is also emitted.
+ 
+ use std::process::Command;
+ 
+ fn main() {
+-    // Re-run when the caller pins a new stamp, or when HEAD moves (so a plain build tracks the
+-    // commit). Missing `.git` just means this rerun-trigger always fires — harmless.
+     println!("cargo:rerun-if-env-changed=DIAG_BUILD");
++    println!("cargo:rerun-if-env-changed=DIAG_RELEASE");
++    println!("cargo:rerun-if-env-changed=DIAG_TARGET");
+     println!("cargo:rerun-if-changed=../.git/HEAD");
+ 
++    let version = version(); // <year>.<release>
++    let is_dev = version.ends_with(".dev");
++    let prefix = match target() {
++        Some(t) => format!("{t}/{version}"), // [<target>/]<year>.<release>
++        None => version.clone(),
++    };
+     let stamp = match std::env::var("DIAG_BUILD") {
+-        Ok(s) if !s.trim().is_empty() => s,
+-        _ => derive(),
++        // A pinned suffix (just diag run, CI): keep it verbatim but lead with target+version.
++        Ok(s) if !s.trim().is_empty() => format!("{prefix}-{s}"),
++        _ => derive(&prefix, is_dev),
+     };
++    println!("cargo:rustc-env=DIAG_VERSION={version}");
+     println!("cargo:rustc-env=DIAG_BUILD={stamp}");
+ }
+ 
+-/// `<short-hash>[-dirty].<unix-secs>` — commit identity plus a timestamp so repeated builds of
+-/// the same (possibly dirty) tree still differ.
+-fn derive() -> String {
+-    let hash = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "nogit".into());
+-    let dirty = match git(&["status", "--porcelain"]) {
++/// Build target (chip/config variant), e.g. `fr2433`, `fr2476`. `None` until we build per-chip —
++/// see the board-crate plan (chip = cargo feature, role = FRAM config).
++fn target() -> Option<String> {
++    std::env::var("DIAG_TARGET")
++        .ok()
++        .map(|t| t.trim().to_string())
++        .filter(|t| !t.is_empty())
++}
++
++/// `<year>.<release>` — CalVer. Year from the build clock; release from `DIAG_RELEASE` (a release
++/// build) or `dev` (no release system yet).
++fn version() -> String {
++    let year = run("date", &["-u", "+%Y"]).unwrap_or_else(|| "0000".into());
++    let release = match std::env::var("DIAG_RELEASE") {
++        Ok(r) if !r.trim().is_empty() => r,
++        _ => "dev".into(),
++    };
++    format!("{year}.{release}")
++}
++
++/// Full derived stamp when no `DIAG_BUILD` suffix is pinned: prefix + commit + dirty (+ time on dev).
++fn derive(prefix: &str, is_dev: bool) -> String {
++    let hash = run("git", &["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "nogit".into());
++    let dirty = match run("git", &["status", "--porcelain"]) {
+         Some(s) if !s.trim().is_empty() => "-dirty",
+         _ => "",
+     };
+-    // build.rs runs on the host toolchain (std available) — only the *target* is no_std.
+-    let secs = std::time::SystemTime::now()
+-        .duration_since(std::time::UNIX_EPOCH)
+-        .map(|d| d.as_secs())
+-        .unwrap_or(0);
+-    format!("{hash}{dirty}.{secs}")
++    let mut stamp = format!("{prefix}-{hash}{dirty}");
++    if is_dev {
++        // build.rs runs on the host toolchain (std available) — only the *target* is no_std.
++        let secs = std::time::SystemTime::now()
++            .duration_since(std::time::UNIX_EPOCH)
++            .map(|d| d.as_secs())
++            .unwrap_or(0);
++        stamp = format!("{stamp}.{secs}");
++    }
++    stamp
+ }
+ 
+-fn git(args: &[&str]) -> Option<String> {
+-    let out = Command::new("git").args(args).output().ok()?;
++fn run(cmd: &str, args: &[&str]) -> Option<String> {
++    let out = Command::new(cmd).args(args).output().ok()?;
+     if !out.status.success() {
+         return None;
+     }
+diff --git a/diag/src/diag.rs b/diag/src/diag.rs
+index 46a67a6..6943d00 100644
+--- a/diag/src/diag.rs
++++ b/diag/src/diag.rs
+@@ -2,7 +2,7 @@
+ //! presence and WHO_AM_I. Add a device with one line in `DEVICES`. Reported over UART, with a
+ //! pass/fail glyph on the LED matrix when present.
+ 
+-use crate::{i2c, is31, uart};
++use crate::{i2c, is31, si7021, uart};
+ use msp430fr2476::Peripherals;
+ 
+ // 8x8 status glyphs (orientation may be mirrored/rotated on real hardware; fix once seen).
+@@ -31,6 +31,9 @@ static DEVICES: &[Dev] = &[
+     Dev { name: "MC6470 accel  ", addr: 0x4C, id_reg: NO_ID, id_val: 0x00 },
+     Dev { name: "MC6470 mag    ", addr: 0x0C, id_reg: NO_ID, id_val: 0x00 },
+     Dev { name: "IS31FL3730 LED", addr: 0x60, id_reg: NO_ID, id_val: 0x00 },
++    // Si7021 T/RH — presence-only here (its part-number ID is a multi-byte command sequence, not a
++    // single-register WHO_AM_I). The `Si7021 T/RH` test reads the real values + identifies the part.
++    Dev { name: "Si7021 T/RH   ", addr: 0x40, id_reg: NO_ID, id_val: 0x00 },
+ ];
+ 
+ /// Is this address one of our expected devices? A scan hit that isn't = config drift.
+@@ -154,6 +157,7 @@ static TESTS: &[Test] = &[
+     Test { name: "bus scan", run: t_scan },
+     Test { name: "device inventory", run: t_devices },
+     Test { name: "MC6470 gravity", run: t_gravity },
++    Test { name: "Si7021 T/RH", run: t_temphum },
+ ];
+ 
+ /// Bus scan + config-drift: Fail if any unexpected address ACKed.
+@@ -200,6 +204,56 @@ fn t_gravity(p: &Peripherals) -> Outcome {
+     }
+ }
+ 
++/// Si7021 temperature + humidity — read the REAL values. Triggers a no-hold RH measurement, reads
++/// it back with a CRC-8 check, pulls temperature from the same acquisition, and identifies the part
++/// (SNB_3 = 0x15). Skip when absent (optional device); Fail only if a present sensor gives a bad CRC
++/// or an out-of-envelope reading (a plausible number that fails CRC is worse than a missing one).
++fn t_temphum(p: &Peripherals) -> Outcome {
++    if !si7021::present(p) {
++        uart::puts(p, "  Si7021: absent (skip)\n");
++        return Outcome::Skip;
++    }
++    if let Some(id) = si7021::part_id(p) {
++        uart::puts(p, "  part=0x");
++        uart::hex8(p, id);
++        uart::puts(p, if id == si7021::PART_SI7021 {
++            " (Si7021)"
++        } else {
++            " (HTU21/SHT21 family?)" // 0xF5/0xF3 shared; only 0x40+values must be right
++        });
++        if let Some(rev) = si7021::firmware_rev(p) {
++            uart::puts(p, " fw=0x");
++            uart::hex8(p, rev);
++        }
++        uart::puts(p, "\n");
++    }
++    match si7021::measure(p) {
++        Some(r) => {
++            uart::puts(p, "  T=");
++            uart::fixed2(p, r.temp_c_centi);
++            uart::puts(p, " C  RH=");
++            uart::fixed2(p, r.rh_centi);
++            uart::puts(p, " %  crc ");
++            uart::puts(p, if r.crc_ok { "OK\n" } else { "BAD\n" });
++            // Verdict: CRC must pass and both values within the sensor's operating envelope
++            // (-40..+125 °C, 0..100 %RH). Catches a live-but-garbling bus, not just a NACK.
++            let sane = r.crc_ok
++                && r.temp_c_centi > -4000
++                && r.temp_c_centi < 12500
++                && (0..=10000).contains(&r.rh_centi);
++            if sane {
++                Outcome::Pass
++            } else {
++                Outcome::Fail
++            }
++        }
++        None => {
++            uart::puts(p, "  Si7021 read FAILED\n");
++            Outcome::Fail
++        }
++    }
++}
++
+ // The POST test bag is driven cooperatively by `tasks::PostTask` — one test per scheduler tick — so
+ // the OLED can show `DIAG N of M` live and the ~1.5 s scan no longer hogs the loop. These are the
+ // pieces it orchestrates:
+diff --git a/diag/src/i2c.rs b/diag/src/i2c.rs
+index d3b8ca6..8126a89 100644
+--- a/diag/src/i2c.rs
++++ b/diag/src/i2c.rs
+@@ -288,3 +288,59 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
+     }
+     true
+ }
++
++/// Pointer-less receiver read: START(R) + read `buf.len()` bytes + STOP. No register write first —
++/// for devices that return a result to a bare read (Si7021 no-hold measurement result, the
++/// electronic-ID / firmware-rev sequences). Same bounded/self-healing contract as `read_reg`'s
++/// receive phase: never hangs, returns false on NACK or timeout.
++pub fn read(p: &Peripherals, addr: u8, buf: &mut [u8]) -> bool {
++    if buf.is_empty() {
++        return false;
++    }
++    if !sda_high(p) {
++        recover(p);
++    }
++    p.e_usci_b0.ucb0i2csa().write(|w| unsafe { w.bits(addr as u16) });
++    p.e_usci_b0
++        .ucb0ifg()
++        .modify(|r, w| unsafe { w.bits(r.bits() & !(UCNACKIFG | UCRXIFG0)) });
++    // Receiver (UCTR=0) + START.
++    p.e_usci_b0
++        .ucb0ctlw0()
++        .modify(|r, w| unsafe { w.bits((r.bits() & !UCTR) | UCTXSTT) });
++    let len = buf.len();
++    for i in 0..len {
++        if i == len - 1 {
++            // Last byte (also the only byte when len==1): wait for the address to clear, then arm
++            // NACK+STOP so the eUSCI NACKs the final byte and releases the bus.
++            let mut n = 0u16;
++            while ctlw0(p) & UCTXSTT != 0 {
++                n += 1;
++                if n >= SPIN {
++                    stop(p);
++                    return false;
++                }
++            }
++            p.e_usci_b0
++                .ucb0ctlw0()
++                .modify(|r, w| unsafe { w.bits(r.bits() | UCTXSTP) });
++        }
++        let mut n = 0u16;
++        while ifg(p) & UCRXIFG0 == 0 {
++            n += 1;
++            if n >= SPIN {
++                stop(p);
++                return false;
++            }
++        }
++        buf[i] = p.e_usci_b0.ucb0rxbuf().read().bits() as u8;
++    }
++    let mut n = 0u16;
++    while ctlw0(p) & UCTXSTP != 0 {
++        n += 1;
++        if n >= SPIN {
++            break;
++        }
++    }
++    true
++}
+diff --git a/diag/src/main.rs b/diag/src/main.rs
+index ea0fef0..7c09f7a 100644
+--- a/diag/src/main.rs
++++ b/diag/src/main.rs
+@@ -26,6 +26,7 @@ mod is31;
+ mod mc6470;
+ mod rcwl;
+ mod regs;
++mod si7021;
+ mod ssd1306_raw;
+ mod stress;
+ mod tasks;
+diff --git a/diag/src/oled.rs b/diag/src/oled.rs
+deleted file mode 100644
+index 27ae364..0000000
+--- a/diag/src/oled.rs
++++ /dev/null
+@@ -1,49 +0,0 @@
+-//! SSD1306 128x32 status display via the `ssd1306` crate over our embedded-hal shim
+-//! ([`crate::hal::EusciI2c`]). First consumer of the board HAL; also the compile-proof that the
+-//! embedded-graphics stack builds for msp430.
+-
+-use crate::hal::EusciI2c;
+-use embedded_graphics::{
+-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+-    pixelcolor::BinaryColor,
+-    prelude::*,
+-    text::{Baseline, Text},
+-};
+-use msp430fr2476::Peripherals;
+-use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
+-
+-/// How far the render got — reported over UART so we know whether the panel actually took the
+-/// data, independent of anyone reading the glass. `init`/`flush` are the two I2C touch-points
+-/// (drawing is into a RAM buffer and can't fail).
+-pub enum Status {
+-    Ok,
+-    InitFail,
+-    FlushFail,
+-}
+-
+-/// Render the POST verdict. `init` and `flush` are the only fallible (bus-touching) steps.
+-pub fn show_status(p: &Peripherals, ok: bool, present: u16, total: u16) -> Status {
+-    let i2c = EusciI2c::new(p);
+-    let interface = I2CDisplayInterface::new(i2c); // defaults to 0x3C
+-    let mut display = Ssd1306::new(interface, DisplaySize128x32, DisplayRotation::Rotate0)
+-        .into_buffered_graphics_mode();
+-    if display.init().is_err() {
+-        return Status::InitFail;
+-    }
+-    let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
+-
+-    // "found N/M" without alloc — counts are single-digit on any real board.
+-    let mut l1 = *b"found 0/0";
+-    l1[6] = b'0' + present.min(9) as u8;
+-    l1[8] = b'0' + total.min(9) as u8;
+-    let line1 = core::str::from_utf8(&l1).unwrap_or("found");
+-    let line2 = if ok { "OK" } else { "FAULT" };
+-
+-    let _ = display.clear(BinaryColor::Off);
+-    let _ = Text::with_baseline(line1, Point::new(0, 0), style, Baseline::Top).draw(&mut display);
+-    let _ = Text::with_baseline(line2, Point::new(0, 16), style, Baseline::Top).draw(&mut display);
+-    if display.flush().is_err() {
+-        return Status::FlushFail;
+-    }
+-    Status::Ok
+-}
+diff --git a/diag/src/si7021.rs b/diag/src/si7021.rs
+new file mode 100644
+index 0000000..a4ac4c8
+--- /dev/null
++++ b/diag/src/si7021.rs
+@@ -0,0 +1,126 @@
++//! Si7021 temperature + relative-humidity sensor (I²C 0x40, shared eUSCI_B0 bus, SDA P1.2 / SCL
++//! P1.3). The "Gut" sensor bus part chosen in Testing/SENSORS.md ("Always on. nA standby. No
++//! interrupt.").
++//!
++//! **No-hold-master measurement, deliberately.** The Si7021's hold-master commands (0xE5/0xE3)
++//! clock-stretch SCL for the whole conversion (~12 ms). Our bounded I²C layer (`i2c`, SPIN≈4000
++//! ≈ <1 ms) would time out mid-stretch and false-fail. So we use the no-hold commands: trigger the
++//! measurement, release the bus, wait out the conversion with a µs-timer delay, then read the
++//! result. Nothing blocks the eUSCI master while the sensor converts.
++//!
++//! **Family-compatible (Si7021 / HTU21D / SHT21).** All three share the no-hold commands 0xF5
++//! (RH) and 0xF3 (temperature) and the 0x40 address, so this driver reads any of them. We
++//! deliberately do NOT use the Si7021-only 0xE0 ("temperature from the previous RH measurement") —
++//! it NACKs on an HTU21/SHT21 and would fail the whole read. Two triggers + two delays is the price
++//! of working across the family; the sensor is "always on", so the extra ~11 ms is free.
++//!
++//! Integer-only math (no float on msp430): results are returned in hundredths (centi-°C, centi-%RH)
++//! and printed via `uart::fixed2`.
++
++use crate::{i2c, usec};
++use msp430fr2476::Peripherals;
++
++pub const ADDR: u8 = 0x40;
++
++const CMD_MEASURE_RH_NOHOLD: u8 = 0xF5; // measure RH, no hold master mode (NACKs read until done)
++const CMD_MEASURE_TEMP_NOHOLD: u8 = 0xF3; // measure T, no hold — shared by Si7021 / HTU21 / SHT21
++const CMD_READ_FW_REV: [u8; 2] = [0x84, 0xB8]; // firmware revision: 0xFF = 1.0, 0x20 = 2.0
++const CMD_READ_ID2: [u8; 2] = [0xFC, 0xC9]; // electronic ID, 2nd access (SNB_3 = part number)
++
++/// SNB_3 part-number byte returned by the electronic-ID read. 0x15 = Si7021 (0x14 = Si7020,
++/// 0x0D = Si7013, 0x00/0xFF = engineering samples).
++pub const PART_SI7021: u8 = 0x15;
++
++/// No-hold conversion times vary a LOT across the family at the power-on default resolution
++/// (12-bit RH / 14-bit T): Si7021 ~12/11 ms, HTU21D ~16/50 ms, SHT21 ~29/**85** ms. We delay for the
++/// worst case (SHT21) so the driver reads any of them — a too-short wait makes the no-hold read
++/// NACK and fail. Busy delay is fine: a POST test runs to a verdict in one tick and this is far
++/// shorter than the ~1.5 s bus scan beside it; the sensor is "always on", so the wait is free.
++const RH_CONVERSION_MS: u16 = 35;
++const TEMP_CONVERSION_MS: u16 = 90;
++
++/// A full sample. Values in hundredths; `crc_ok` is the CRC-8 check on the RH data word — a bus
++/// integrity signal, not just a value.
++pub struct Reading {
++    pub temp_c_centi: i32, // hundredths of a °C
++    pub rh_centi: i32,     // hundredths of a %RH, clamped 0..=10000
++    pub crc_ok: bool,
++}
++
++/// Does the sensor ACK its address? (bounded probe.)
++pub fn present(p: &Peripherals) -> bool {
++    i2c::probe(p, ADDR)
++}
++
++/// SNB_3 part-number byte (see [`PART_SI7021`]). `None` if the ID sequence NACKs / times out.
++pub fn part_id(p: &Peripherals) -> Option<u8> {
++    if !i2c::write(p, ADDR, &CMD_READ_ID2) {
++        return None;
++    }
++    // 2nd-access ID returns SNB_3, SNB_2, CRC, SNB_1, SNB_0, CRC; SNB_3 is the part number.
++    let mut b = [0u8; 6];
++    if !i2c::read(p, ADDR, &mut b) {
++        return None;
++    }
++    Some(b[0])
++}
++
++/// Firmware revision byte (0xFF = 1.0, 0x20 = 2.0). `None` on NACK / timeout.
++pub fn firmware_rev(p: &Peripherals) -> Option<u8> {
++    if !i2c::write(p, ADDR, &CMD_READ_FW_REV) {
++        return None;
++    }
++    let mut b = [0u8; 1];
++    if !i2c::read(p, ADDR, &mut b) {
++        return None;
++    }
++    Some(b[0])
++}
++
++/// CRC-8, polynomial x⁸+x⁵+x⁴+1 (0x131), init 0x00, MSB-first — the Si7021 / SHT2x checksum over
++/// the two measurement data bytes.
++fn crc8(data: &[u8]) -> u8 {
++    let mut crc: u8 = 0;
++    for &b in data {
++        crc ^= b;
++        for _ in 0..8 {
++            crc = if crc & 0x80 != 0 { (crc << 1) ^ 0x31 } else { crc << 1 };
++        }
++    }
++    crc
++}
++
++/// Trigger a no-hold measurement (`cmd`), wait out the conversion, and read 2 data bytes + CRC with
++/// a bare (pointer-less) read. `None` if the trigger or read NACKs/times out — never hangs.
++fn convert(p: &Peripherals, cmd: u8, wait_ms: u16) -> Option<[u8; 3]> {
++    if !i2c::write(p, ADDR, &[cmd]) {
++        return None;
++    }
++    usec::delay_ms(p, wait_ms); // bus is free while the sensor converts
++    let mut b = [0u8; 3];
++    if !i2c::read(p, ADDR, &mut b) {
++        return None;
++    }
++    Some(b)
++}
++
++/// Read back both temperature and humidity (real values) as two no-hold conversions. `None` if any
++/// transfer NACKs or times out (absent sensor / bus fault) — never hangs.
++pub fn measure(p: &Peripherals) -> Option<Reading> {
++    // Humidity. %RH = 125 * code / 65536 - 6; low 2 bits are status, not measurement — mask them.
++    // In centi-%RH: 12500 * code / 65536 - 600. (12500 * 65535 fits u32.)
++    let rh = convert(p, CMD_MEASURE_RH_NOHOLD, RH_CONVERSION_MS)?;
++    let rh_crc_ok = crc8(&rh[..2]) == rh[2];
++    let rh_code = ((((rh[0] as u16) << 8) | rh[1] as u16) & 0xFFFC) as u32;
++    let rh_centi = ((12500 * rh_code / 65536) as i32 - 600).clamp(0, 10000);
++
++    // Temperature (0xF3, family-shared — NOT the Si7021-only 0xE0; see module docs). The low 2 bits
++    // are status, not measurement — mask them off (same as RH).
++    // T(°C) = 175.72 * code / 65536 - 46.85; in centi-°C: 17572 * code / 65536 - 4685.
++    let t = convert(p, CMD_MEASURE_TEMP_NOHOLD, TEMP_CONVERSION_MS)?;
++    let t_crc_ok = crc8(&t[..2]) == t[2];
++    let t_code = ((((t[0] as u16) << 8) | t[1] as u16) & 0xFFFC) as u32;
++    let temp_c_centi = (17572 * t_code / 65536) as i32 - 4685;
++
++    Some(Reading { temp_c_centi, rh_centi, crc_ok: rh_crc_ok && t_crc_ok })
++}
+diff --git a/diag/src/uart.rs b/diag/src/uart.rs
+index 8055f53..a442487 100644
+--- a/diag/src/uart.rs
++++ b/diag/src/uart.rs
+@@ -64,3 +64,18 @@ pub fn dec(p: &Peripherals, mut v: u16) {
+         putc(p, buf[i]);
+     }
+ }
++
++/// Signed hundredths as a fixed-point decimal, e.g. `-1234 -> "-12.34"`. For sensor values kept
++/// as centi-units (no float on msp430): temperature in centi-°C, humidity in centi-%RH.
++pub fn fixed2(p: &Peripherals, centi: i32) {
++    let mut v = centi;
++    if v < 0 {
++        putc(p, b'-');
++        v = -v;
++    }
++    dec(p, (v / 100) as u16); // integer part (≤ a few hundred here) fits u16
++    putc(p, b'.');
++    let f = (v % 100) as u16;
++    putc(p, b'0' + (f / 10) as u8);
++    putc(p, b'0' + (f % 10) as u8);
++}
+diff --git a/diag/src/usec.rs b/diag/src/usec.rs
+index 985a9f7..7117add 100644
+--- a/diag/src/usec.rs
++++ b/diag/src/usec.rs
+@@ -23,3 +23,17 @@ pub fn start(p: &Peripherals) {
+ pub fn now(p: &Peripherals) -> u16 {
+     p.ta0.ta0r().read().bits()
+ }
++
++/// Busy-wait `us` microseconds (≤ 65535, i.e. under one TA0 wrap). Polls tightly so it never
++/// misses the wrap. Used for sensor conversion waits (e.g. the Si7021 no-hold RH conversion).
++pub fn delay_us(p: &Peripherals, us: u16) {
++    let start = now(p);
++    while now(p).wrapping_sub(start) < us {}
++}
++
++/// Busy-wait `ms` milliseconds, in 1 ms chunks so each stays under the 65.5 ms TA0 wrap.
++pub fn delay_ms(p: &Peripherals, ms: u16) {
++    for _ in 0..ms {
++        delay_us(p, 1000);
++    }
++}
+diff --git a/docker/Dockerfile b/docker/Dockerfile
+index 196bed7..8a22f9b 100644
+--- a/docker/Dockerfile
++++ b/docker/Dockerfile
+@@ -1,20 +1,41 @@
+-# MSP430 C + Rust toolchain: reuse cdelledonne/msp430-gcc (msp430-gcc 8.3, FR2476 device
+-# files, mspdebug-capable) and layer a pinned Rust nightly + rust-src for msp430-none-elf.
+-FROM cdelledonne/msp430-gcc:latest
++# MSP430 C + Rust toolchain image.
++#
++# Base: ubuntu:24.04 (glibc 2.39). Two glibc constraints must both be met:
++#   • GitHub Actions' Node 20/24 runtime needs glibc >= 2.28 (the old cdelledonne base failed this
++#     with "GLIBC_2.28 not found", breaking checkout/upload-artifact inside the container);
++#   • our msp430-elf-gcc is built on ubuntu-24.04 (toolchain-msp430-gcc.yml), so its binary needs
++#     glibc >= 2.38. Matching the base to the build runner (ubuntu:24.04) satisfies both.
++#
++# msp430-elf-gcc: OUR reproducible 9.3.1 build, fetched from the GitHub Release that
++# toolchain-msp430-gcc.yml publishes — so CI, the release, and local dev all run the SAME toolchain.
++FROM ubuntu:24.04
+ 
+-ARG RUST_TOOLCHAIN=nightly-2025-06-25
+-USER root
++ARG RUST_TOOLCHAIN=nightly-2025-06-25          # keep in sync with diag/rust-toolchain.toml
++ARG MSP430_GCC_REPO=experientials/msp-fw
++ARG MSP430_GCC_TAG=msp430-gcc-9.3.1
++ARG MSP430_GCC_ASSET=msp430-elf-gcc-9.3.1-linux-x86_64.tar.xz
+ 
++# build-essential (not just gcc) — Rust proc-macro/build-script deps (quote/syn) link HOST binaries
++# and need the C runtime (Scrt1.o/crti.o/libc), which lives in libc6-dev. `make` builds the C example.
+ RUN apt-get update && apt-get install -y --no-install-recommends \
+-      curl ca-certificates gcc && rm -rf /var/lib/apt/lists/*
++      curl ca-certificates xz-utils git make build-essential \
++ && rm -rf /var/lib/apt/lists/*
++
++# Our msp430-elf-gcc 9.3.1 (public repo → release asset needs no auth). Extracts to /opt/msp430-gcc,
++# with device headers + linker scripts under /opt/msp430-gcc/include (see build-msp430-gcc.sh).
++RUN curl --proto '=https' --tlsv1.2 -fsSL \
++      "https://github.com/${MSP430_GCC_REPO}/releases/download/${MSP430_GCC_TAG}/${MSP430_GCC_ASSET}" \
++      | tar -C /opt -xJ \
++ && /opt/msp430-gcc/bin/msp430-elf-gcc --version | head -1
+ 
+ ENV RUSTUP_HOME=/opt/rustup \
+     CARGO_HOME=/opt/cargo \
+-    PATH=/opt/cargo/bin:/opt/ti/msp430-gcc/bin:/usr/local/bin:/usr/bin:/bin
++    MSP430_TOOLCHAIN_PATH=/opt/msp430-gcc \
++    PATH=/opt/cargo/bin:/opt/msp430-gcc/bin:/usr/local/bin:/usr/bin:/bin
+ 
+ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+       | sh -s -- -y --default-toolchain ${RUST_TOOLCHAIN} --profile minimal --component rust-src \
+- && rustc --version && cargo --version && msp430-elf-gcc --version | head -1
++ && rustc --version && cargo --version
+ 
+ # just — command runner (prebuilt binary). CI and local dev run the same recipes.
+ RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+diff --git a/scripts/build-msp430-gcc.sh b/scripts/build-msp430-gcc.sh
+new file mode 100755
+index 0000000..ccad356
+--- /dev/null
++++ b/scripts/build-msp430-gcc.sh
+@@ -0,0 +1,129 @@
++#!/usr/bin/env bash
++# Build msp430-elf-gcc from source into a relocatable prefix — Linux AND macOS.
++#
++# Recipe = the tgtakaoka Homebrew formula's sources, verbatim: GNU **binutils 2.34 + gcc 9.3.0 +
++# newlib 2.4.0**, all patched with **TI's MSP430-GCC 9.3.1 source patches**, plus TI's device support
++# files. We build directly (not via `brew install`) because the tap formula is incompatible with
++# modern macOS Homebrew (it writes outside its keg → the mandatory install sandbox EPERMs, and that
++# sandbox can't be disabled on macOS). Building ourselves sidesteps Homebrew entirely.
++#
++# `MAKEINFO=true` skips the info-doc build (needs `makeinfo`/texinfo, absent on macOS) — the docs
++# are unused. So this needs NO texinfo and NO newer Xcode; the compiler was never the problem.
++#
++# Used by CI (.github/workflows/toolchain-msp430-gcc.yml) for Linux tarballs, on a Pi, and on macOS.
++# Env: PREFIX (install dir), JOBS, WORK (build dir). On macOS, gmp/mpfr/libmpc/isl come from brew.
++set -euo pipefail
++
++OS="$(uname -s)"
++PREFIX="${PREFIX:-/opt/msp430-gcc}"
++JOBS="${JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl -n hw.ncpu 2>/dev/null || echo 4 )}"
++WORK="${WORK:-$PWD/msp430-gcc-build}"
++TARGET=msp430-elf
++
++BINUTILS=binutils-2.34
++GCC=gcc-9.3.0
++NEWLIB=newlib-2.4.0
++TI_BASE="https://software-dl.ti.com/msp430/msp430_public_sw/mcu/msp430/MSPGCC/9_3_1_2/export"
++PATCHES_TB="msp430-gcc-9.3.1.11-source-patches.tar.bz2"
++SUPPORT_ZIP="msp430-gcc-support-files-1.212.zip"
++
++mkdir -p "$(dirname "$PREFIX")" 2>/dev/null || true
++# apt needs root; `make install` needs root only if the prefix's parent isn't ours.
++apt_sudo=""; [ "$(id -u)" = 0 ] || apt_sudo="sudo"
++inst_sudo=""; { [ -w "$(dirname "$PREFIX")" ] || [ "$(id -u)" = 0 ]; } || inst_sudo="sudo"
++
++# macOS has TWO Homebrews (arm64 /opt/homebrew, Intel /usr/local). A NATIVE build needs the libs
++# from the matching-arch one, and plain `brew` on PATH is often the Intel one — which would make
++# gcc's --with-gmp point where no arm64 libs exist. Pin the native-arch brew explicitly.
++BREW=""
++if [ "$OS" = Darwin ]; then
++  if [ "$(uname -m)" = arm64 ] && [ -x /opt/homebrew/bin/brew ]; then BREW=/opt/homebrew/bin/brew
++  elif [ -x /usr/local/bin/brew ]; then BREW=/usr/local/bin/brew
++  else BREW="$(command -v brew || true)"; fi
++  [ -n "$BREW" ] || { echo "Homebrew required on macOS (brew.sh)" >&2; exit 1; }
++fi
++
++install_deps() {
++  case "$OS" in
++    Darwin)
++      "$BREW" install gmp mpfr libmpc isl >/dev/null 2>&1 || "$BREW" install gmp mpfr libmpc isl
++      ;;
++    *)
++      command -v apt-get >/dev/null || return 0
++      $apt_sudo apt-get update
++      $apt_sudo apt-get install -y --no-install-recommends \
++        build-essential texinfo bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev \
++        zlib1g-dev wget unzip bzip2 xz-utils ca-certificates patch
++      ;;
++  esac
++}
++
++fetch() { local f; f="$(basename "$1")"; [ -f "$f" ] || curl -fL "$1" -o "$f"; }
++
++main() {
++  install_deps
++  mkdir -p "$WORK"; cd "$WORK"
++
++  echo "== fetch sources =="
++  fetch "https://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2"
++  fetch "https://ftp.gnu.org/gnu/gcc/$GCC/$GCC.tar.xz"
++  fetch "https://sourceware.org/pub/newlib/$NEWLIB.tar.gz"
++  fetch "$TI_BASE/$PATCHES_TB"
++  fetch "$TI_BASE/$SUPPORT_ZIP"
++
++  rm -rf "$BINUTILS" "$GCC" "$NEWLIB" patches build-binutils build-gcc support
++  tar xf "$BINUTILS.tar.bz2"
++  tar xf "$GCC.tar.xz"
++  tar xf "$NEWLIB.tar.gz"
++  mkdir -p patches && tar xf "$PATCHES_TB" -C patches
++
++  # Locate the three TI patches regardless of the archive's internal directory name.
++  local bpatch gpatch npatch
++  bpatch="$(find "$PWD/patches" -name 'binutils-2_34.patch' | head -1)"
++  gpatch="$(find "$PWD/patches" -name 'gcc-9.3.0.patch'     | head -1)"
++  npatch="$(find "$PWD/patches" -name 'newlib-2_4_0.patch'  | head -1)"
++  [ -n "$bpatch" ] && [ -n "$gpatch" ] && [ -n "$npatch" ] \
++    || { echo "TI patches not found inside $PATCHES_TB" >&2; exit 1; }
++
++  echo "== patch (TI 9.3.1 over upstream) =="
++  ( cd "$BINUTILS" && patch -p0 < "$bpatch" )
++  ( cd "$GCC"      && patch -p0 < "$gpatch" )
++  ( cd "$NEWLIB"   && patch -p0 < "$npatch" )
++  cp -a "$NEWLIB/newlib" "$NEWLIB/libgloss" "$GCC/"   # staged into the gcc tree, as the formula does
++
++  echo "== binutils =="
++  mkdir build-binutils && ( cd build-binutils &&
++    "../$BINUTILS/configure" --target=$TARGET --program-prefix=$TARGET- --prefix="$PREFIX" \
++      --enable-languages=c,c++ --disable-nls --enable-inifini-array --disable-sim --disable-gdb \
++      --disable-werror --with-system-zlib &&
++    make -j"$JOBS" MAKEINFO=true && $inst_sudo make install MAKEINFO=true )
++  export PATH="$PREFIX/bin:$PATH"
++
++  # On macOS the GMP/MPFR/MPC/ISL that gcc needs live under Homebrew, not the default search path.
++  # Plain (unquoted) string, not an array — avoids macOS bash 3.2's empty-array-under-`set -u` error.
++  # Homebrew paths have no spaces, so word-splitting is safe here.
++  local gmp_flags=""
++  if [ "$OS" = Darwin ]; then
++    local bp; bp="$("$BREW" --prefix)"   # the NATIVE-arch Homebrew (see BREW resolution above)
++    gmp_flags="--with-gmp=$bp/opt/gmp --with-mpfr=$bp/opt/mpfr --with-mpc=$bp/opt/libmpc --with-isl=$bp/opt/isl"
++  fi
++
++  echo "== gcc + newlib =="
++  # shellcheck disable=SC2086
++  mkdir build-gcc && ( cd build-gcc &&
++    "../$GCC/configure" --target=$TARGET --program-prefix=$TARGET- --prefix="$PREFIX" \
++      --enable-languages=c,c++ --disable-nls --enable-inifini-array --enable-target-optspace \
++      --enable-newlib-nano-formatted-io --with-system-zlib $gmp_flags \
++      --with-as="$PREFIX/bin/$TARGET-as" --with-ld="$PREFIX/bin/$TARGET-ld" &&
++    make -j"$JOBS" MAKEINFO=true && $inst_sudo make install MAKEINFO=true )
++
++  echo "== device support files (headers + linker scripts) =="
++  mkdir support && ( cd support && unzip -q "../$SUPPORT_ZIP" )
++  local sfinc; sfinc="$(dirname "$(find support -name 'msp430fr2476.ld' | head -1)")"
++  [ -n "$sfinc" ] && { $inst_sudo mkdir -p "$PREFIX/include"; $inst_sudo cp -a "$sfinc/." "$PREFIX/include/"; }
++
++  echo "✅ built msp430-elf-gcc at $PREFIX"
++  "$PREFIX/bin/$TARGET-gcc" --version | head -1
++}
++
++main "$@"
+diff --git a/scripts/doctor.sh b/scripts/doctor.sh
+new file mode 100755
+index 0000000..3c2ac63
+--- /dev/null
++++ b/scripts/doctor.sh
+@@ -0,0 +1,46 @@
++#!/usr/bin/env bash
++# Prove the native toolchain is correctly SEGREGATED: the pinned nightly is reachable for builds,
++# and it is NOT the system default rustc. Invoked by `just diag doctor`. Non-zero exit on problems.
++set -euo pipefail
++
++repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++store="${MSP430_RUST_HOME:-$HOME/.local/share/msp430-rust}"
++tc="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$repo_root/diag/rust-toolchain.toml")"
++fail=0
++
++echo "pinned channel:   $tc"
++echo "segregated store: $store"
++
++# 1) System default rustc must NOT be our nightly — that's the segregation guarantee.
++sys_rustc="$(command -v rustc || true)"
++sys_ver="$([ -n "$sys_rustc" ] && "$sys_rustc" --version 2>/dev/null || echo '<none>')"
++echo "system rustc:     ${sys_rustc:-<none>}  ($sys_ver)"
++if printf '%s' "$sys_ver" | grep -q "$tc"; then
++  echo "  ✗ system default rustc IS the pinned nightly — segregation LEAKED (did something run 'rustup default $tc'?)"
++  fail=1
++else
++  echo "  ✓ system default rustc is not the msp-fw nightly"
++fi
++case "$sys_rustc" in
++  */Cellar/rust/*|/usr/local/bin/rustc)
++    echo "  ℹ note: that's the old Homebrew 'rust' — harmless (native build never uses it); 'brew uninstall rust' if unused elsewhere" ;;
++esac
++
++# 2) The pinned nightly + rust-src must exist in the DEDICATED store (not ~/.rustup).
++if [ -d "$store/rustup/toolchains" ] && \
++   RUSTUP_HOME="$store/rustup" CARGO_HOME="$store/cargo" rustup run "$tc" rustc --version >/dev/null 2>&1; then
++  echo "  ✓ pinned nightly in dedicated store: $(RUSTUP_HOME="$store/rustup" CARGO_HOME="$store/cargo" rustup run "$tc" rustc --version)"
++else
++  echo "  ✗ pinned nightly NOT in dedicated store — run: bash scripts/setup-native-macos.sh"
++  fail=1
++fi
++
++# 3) The linker.
++if command -v msp430-elf-gcc >/dev/null; then
++  echo "  ✓ linker: $(command -v msp430-elf-gcc)  ($(msp430-elf-gcc --version | head -1))"
++else
++  echo "  ✗ msp430-elf-gcc not found — run: bash scripts/setup-native-macos.sh"
++  fail=1
++fi
++
++if [ "$fail" = 0 ]; then echo "doctor: OK — segregation held"; else echo "doctor: PROBLEMS (see ✗ above)"; exit 1; fi
+diff --git a/scripts/fetch-msp430-gcc.sh b/scripts/fetch-msp430-gcc.sh
+new file mode 100755
+index 0000000..e705b3e
+--- /dev/null
++++ b/scripts/fetch-msp430-gcc.sh
+@@ -0,0 +1,30 @@
++#!/usr/bin/env bash
++# Fetch a prebuilt msp430-elf-gcc (published by .github/workflows/toolchain-msp430-gcc.yml) for this
++# host arch and extract it — so a Raspberry Pi / Linux node installs the toolchain in seconds instead
++# of compiling it for ~30–60 min. See references/native-build-linux.md.
++#
++# Env: MSP430_GCC_REPO (owner/repo), MSP430_GCC_TAG (release tag), MSP430_GCC_DEST (extract parent).
++set -euo pipefail
++
++REPO="${MSP430_GCC_REPO:-experientials/msp-fw}"
++TAG="${MSP430_GCC_TAG:-msp430-gcc-9.3.1}"
++DEST="${MSP430_GCC_DEST:-/opt}"
++
++case "$(uname -m)" in
++  aarch64|arm64) arch=aarch64 ;;
++  x86_64|amd64)  arch=x86_64 ;;
++  *) echo "no prebuilt for arch $(uname -m) — build from source: scripts/build-msp430-gcc.sh" >&2; exit 1 ;;
++esac
++
++asset="msp430-elf-gcc-9.3.1-linux-${arch}.tar.xz"
++url="https://github.com/$REPO/releases/download/$TAG/$asset"
++SUDO=""; [ -w "$DEST" ] || SUDO="sudo"
++
++echo "fetching $url"
++tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
++curl -fL "$url" -o "$tmp/$asset"
++$SUDO tar -C "$DEST" -xf "$tmp/$asset"
++
++echo "✅ installed at $DEST/msp430-gcc"
++echo "   add to PATH:  export PATH=$DEST/msp430-gcc/bin:\$PATH"
++"$DEST/msp430-gcc/bin/msp430-elf-gcc" --version | head -1 || true
+diff --git a/scripts/native-available.sh b/scripts/native-available.sh
+new file mode 100755
+index 0000000..80ee392
+--- /dev/null
++++ b/scripts/native-available.sh
+@@ -0,0 +1,12 @@
++#!/usr/bin/env bash
++# Exit 0 if the segregated native toolchain is ready (pinned nightly in the dedicated store +
++# msp430-elf-gcc on PATH), else 1. Quiet — used by `just diag build` to pick native vs Docker.
++set -euo pipefail
++repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++store="${MSP430_RUST_HOME:-$HOME/.local/share/msp430-rust}"
++tc="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$repo_root/diag/rust-toolchain.toml")"
++
++command -v msp430-elf-gcc >/dev/null 2>&1 || exit 1
++command -v rustup >/dev/null 2>&1 || exit 1
++[ -d "$store/rustup/toolchains" ] || exit 1
++RUSTUP_HOME="$store/rustup" CARGO_HOME="$store/cargo" rustup run "$tc" rustc --version >/dev/null 2>&1 || exit 1
+diff --git a/scripts/native-build.sh b/scripts/native-build.sh
+new file mode 100755
+index 0000000..5a11c15
+--- /dev/null
++++ b/scripts/native-build.sh
+@@ -0,0 +1,25 @@
++#!/usr/bin/env bash
++# Native, SEGREGATED diag build — no Docker/amd64 emulation. Invoked by `just diag build` (native
++# path) and `just diag dev`.
++#
++# The pinned nightly is used ONLY through the dedicated RUSTUP_HOME/CARGO_HOME below; this never
++# touches ~/.rustup and never becomes the system default rustc. Docker remains the canonical build
++# (`just diag build`); this is the fast local alternative. See scripts/setup-native-macos.sh.
++#
++# Arg 1: cargo profile — "release" (default, LTO) or "fast" (no-LTO, quick iteration).
++set -euo pipefail
++
++profile="${1:-release}"
++repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++store="${MSP430_RUST_HOME:-$HOME/.local/share/msp430-rust}"
++tc="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$repo_root/diag/rust-toolchain.toml")"
++
++export RUSTUP_HOME="$store/rustup"
++export CARGO_HOME="$store/cargo"
++[ -d "$RUSTUP_HOME/toolchains" ] || { echo "native toolchain missing — run: bash scripts/setup-native-macos.sh" >&2; exit 1; }
++command -v msp430-elf-gcc >/dev/null || { echo "msp430-elf-gcc missing — run: bash scripts/setup-native-macos.sh" >&2; exit 1; }
++
++if [ "$profile" = "release" ]; then flag="--release"; else flag="--profile $profile"; fi
++# shellcheck disable=SC2086
++( cd "$repo_root/diag" && rustup run "$tc" cargo build $flag )
++msp430-elf-size "$repo_root/diag/target/msp430-none-elf/$profile/diag"
+diff --git a/scripts/setup-native-macos.sh b/scripts/setup-native-macos.sh
+new file mode 100755
+index 0000000..b064975
+--- /dev/null
++++ b/scripts/setup-native-macos.sh
+@@ -0,0 +1,80 @@
++#!/usr/bin/env bash
++# Set up a NATIVE macOS build of the msp-fw Rust firmware — no amd64 Docker emulation.
++#
++# Segregation is the whole point: the pinned Rust nightly lives in a DEDICATED toolchain home
++# (default ~/.local/share/msp430-rust), NEVER in ~/.rustup and NEVER as the system-default rustc.
++# Your stray Homebrew `rust 1.64` at /usr/local/bin is left completely untouched — this toolchain is
++# only ever reached through `just diag build` (which exports the env below into its own subshell).
++#
++# The msp430-elf-gcc LINKER is a uniquely-named cross-tool (shadows no system compiler), so it's fine
++# to install it via Homebrew natively. Flashing (mspdebug + libmsp430.dylib, x86_64/Rosetta) is a
++# SEPARATE concern handled by the msp430-macos-dev skill's setup-macos.sh — not this script.
++#
++# Idempotent: safe to re-run. Reads the pinned channel from diag/rust-toolchain.toml (one source of
++# truth, shared with the Docker image's RUST_TOOLCHAIN).
++set -euo pipefail
++
++repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++store="${MSP430_RUST_HOME:-$HOME/.local/share/msp430-rust}"
++toolchain_file="$repo_root/diag/rust-toolchain.toml"
++
++# --- pinned channel: single source of truth (same file the Dockerfile pins to) --------------------
++tc="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$toolchain_file")"
++[ -n "$tc" ] || { echo "ERROR: could not read channel from $toolchain_file" >&2; exit 1; }
++echo "== pinned Rust toolchain: $tc =="
++echo "== segregated store:      $store =="
++
++# --- preflight: rustup + brew must exist (we don't silently install system tools) -----------------
++command -v rustup >/dev/null || {
++  echo "ERROR: rustup not found. Install it WITHOUT a default toolchain so nothing global changes:" >&2
++  echo "  brew install rustup                 # or: curl https://sh.rustup.rs | sh -s -- --default-toolchain none" >&2
++  exit 1
++}
++command -v brew >/dev/null || { echo "ERROR: Homebrew not found (needed for msp430-elf-gcc)." >&2; exit 1; }
++
++# --- 1) install the pinned nightly + rust-src INTO THE DEDICATED HOME ------------------------------
++# Overriding RUSTUP_HOME/CARGO_HOME here means this writes only under $store — ~/.rustup is not
++# touched, and we never run `rustup default`, so the system default rustc is unaffected.
++export RUSTUP_HOME="$store/rustup"
++export CARGO_HOME="$store/cargo"
++mkdir -p "$RUSTUP_HOME" "$CARGO_HOME"
++echo "== installing $tc (+ rust-src) into the dedicated home =="
++rustup toolchain install "$tc" --profile minimal --component rust-src --no-self-update
++rustup run "$tc" rustc --version
++
++# --- 2) install the native msp430-elf-gcc linker (uniquely-named cross-tool) -----------------------
++# The tgtakaoka tap formulae have two bugs on modern macOS (neither is a compiler/Xcode issue — no
++# Xcode upgrade needed; see the skill's macos-setup.md):
++#   BUG1: they build info docs needing `makeinfo` (absent on macOS) → binutils dies at bfd.info.
++#         The docs are deleted anyway, so we patch `make` → `make MAKEINFO=true` to skip them.
++#   BUG2: the binutils formula writes into /opt/homebrew/lib (outside its keg) → Homebrew's build
++#         SANDBOX EPERMs → we install with HOMEBREW_NO_SANDBOX=1.
++# The formula edits are local (a `brew update` reverts them) but the built keg persists.
++if ! command -v msp430-elf-gcc >/dev/null 2>&1; then
++  echo "== installing msp430-elf-gcc (tgtakaoka tap, ~20-40 min from source) =="
++  brew tap tgtakaoka/msp430-elf
++  brew trust tgtakaoka/msp430-elf 2>/dev/null || true
++  tapdir="$(brew --repo tgtakaoka/msp430-elf)"
++  for f in binutils-msp430-elf gcc-msp430-elf; do
++    rb="$tapdir/$f.rb"
++    if [ -f "$rb" ] && ! grep -q 'MAKEINFO=true' "$rb"; then   # idempotent
++      sed -i '' -e 's/system "make", "install"/system "make", "install", "MAKEINFO=true"/' \
++                -e 's/system "make"$/system "make", "MAKEINFO=true"/' "$rb"
++    fi
++  done
++  HOMEBREW_NO_SANDBOX=1 brew install --build-from-source gcc-msp430-elf gdb-msp430-elf
++fi
++echo "linker: $(command -v msp430-elf-gcc) -> $(msp430-elf-gcc --version | head -1)"
++
++# --- 3) smoke-build the simplest firmware natively, proving the whole path works -------------------
++echo "== native smoke build: examples/hello-rust =="
++( cd "$repo_root/examples/hello-rust" && rustup run "$tc" cargo build --release )
++
++cat <<EOF
++
++✅ Native toolchain ready — segregated in $store (NOT the system default).
++   Build:  just diag build                   (native once set up; 'just diag dev' = fast build+flash)
++   Check:  just diag doctor                  (verifies segregation held)
++   Flash:  just diag flash                   (unchanged; msp430-macos-dev skill, Rosetta mspdebug)
++   Docker build ('just diag build') is untouched and remains canonical for release/CI.
++EOF
