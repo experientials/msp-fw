@@ -15,6 +15,12 @@ Pinout on the launchpad reserves pins for
 
 ![MSP430 symbol](./TEST-FR2476.png)
 
+> ⚠ **The symbol above is a SUPERSEDED 2022 POC — do not use it for pinout.** It reverses the
+> eUSCI_B0/B1 roles and shows buses the MSP doesn't have. Canonical pin map:
+> [crates/bsp/connections.toml](./crates/bsp/connections.toml) — **SENSOR = eUSCI_B0 (P1.2/P1.3),
+> STEM = eUSCI_B1 (P3.2/P3.6); MSP is on Stem + Sensor only (no SYS_I2C)**. See
+> [msp-ex/SUPERSEDED.md](./msp-ex/SUPERSEDED.md).
+
 Drive it with 3V3 from Raspberry Pi.
 
 A motion sensor MC6470 is connected to SENSOR I2C.

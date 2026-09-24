@@ -284,4 +284,20 @@ schematic (`buttons.rs`).
 - [ ] Wire `examples/*` onto `crates/sched`.
 - [ ] `connections.toml` package field `RHB VQFN-40` — confirm the real bob-929 package.
 - [ ] Verify **FR2433** I²C pins from *its* datasheet before trusting P1.2/P1.3 there.
+- [x] **Banner the SUPERSEDED `TEST-FR2476` POC render** (2026-09-24) — the 2022 Eeschema symbol
+      reverses the eUSCI_B0/B1 roles (SENSOR on B1/P3.2-6, STEM on B0-alt/P4.5-6), shows a
+      **SYS_I2C on MSP pins P4.3/P4.4 that doesn't exist** (MSP is Stem + Sensor ONLY), and reserves
+      P1.2/P1.3 for the dead "nand sim" SPI idea. DONE: red "SUPERSEDED — DO NOT USE FOR PINOUT" banner
+      + diagonal watermark rasterised onto all three PNGs (`TEST-FR2476.png`, `msp-ex/TEST-FR2476.png`,
+      `msp-ex/TEST-FR2476TPTR.png`) via `rsvg-convert` (originals recoverable from git); SVG `<title>`/
+      `<desc>` marked superseded; `msp-ex/SUPERSEDED.md` written; `HARDWARE.md` caption added. Canonical
+      pin map = `crates/bsp/connections.toml`; bus roles = `ziloo/Hardware/stem/STEM-EXPANDER.md`
+      "MSP430 supervisor bus scope".
+- [ ] **Locate the original KiCad designs** for the MSP supervisor (and related bob-929/ziloo boards)
+      — the project that produced `TEST-FR2476TPTR.svg` was exported by **Eeschema on 2022/10/01** but
+      is **not in ANY repo in the Talki tree** (searched all 51 `.kicad_sch/.kicad_sym/.lib/.dcm`:
+      none mention FR2476 / MSP430FR24 / TEST-FR2476 / PT0048 / SENSOR_SDA_B1). Only the PNG/SVG exports
+      live in `msp-ex/`. Find the source project (Henrik's machine / an un-imported repo / old backup),
+      import it into the tree, then correct it to `connections.toml` or formally retire it. (Henrik,
+      2026-09-24.)
 - [ ] Push `main` to origin (1 commit ahead) when ready.
