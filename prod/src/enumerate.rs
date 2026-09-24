@@ -49,6 +49,17 @@ pub struct Scan {
     pub faulted: bool,
 }
 
+impl Scan {
+    /// A "no scan happened" result — used in Passive mode, where the MSP never masters the sensor
+    /// bus. Empty presence, not faulted (nothing was probed).
+    pub const fn absent() -> Self {
+        Self {
+            present: Presence::new(),
+            faulted: false,
+        }
+    }
+}
+
 /// Scan the sensor bus. First checks/recovers a wedged bus (a low SDA makes every probe false-ACK),
 /// then probes 0x08..=0x77 via `devices::present`, and flags `faulted` if SDA is still stuck or the
 /// hit count is implausibly high. Populates state read by the debug registers — always runs (not

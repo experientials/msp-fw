@@ -33,6 +33,12 @@ compile_error!("prod: enable one family feature — `--features fr247x` (default
 #[cfg(all(feature = "fr247x", feature = "fr24xx"))]
 compile_error!("prod: enable exactly ONE family feature (fr247x XOR fr24xx), not both");
 
+// OPERATING MODES (DESIGN.md): compile in ≥1 mode; sensing needs a 2nd I²C so it's dual-I²C only.
+#[cfg(not(any(feature = "mode-passive", feature = "mode-sensing")))]
+compile_error!("prod: enable at least one mode — `--features mode-passive` and/or `mode-sensing`");
+#[cfg(all(feature = "fr24xx", feature = "mode-sensing"))]
+compile_error!("prod: `mode-sensing` requires a dual-I²C family — FR2433 (fr24xx) is Passive-only");
+
 #[cfg(feature = "fr247x")]
 use msp430fr2476::Peripherals; // FR2476/FR2475 — dual-I²C (2× eUSCI_B)
 #[cfg(feature = "fr24xx")]
@@ -54,6 +60,10 @@ mod i2c;
 mod enumerate;
 #[cfg(feature = "fr247x")]
 mod status;
+#[cfg(feature = "fr247x")]
+mod mode;
+#[cfg(feature = "fr247x")]
+mod stem;
 // UART logging is the `console` feature (dev only). Off = silent production image; state then lives
 // only in the debug registers (served by the I2C-slave surface). See status.rs / the console question.
 #[cfg(all(feature = "fr247x", feature = "console"))]
@@ -101,24 +111,39 @@ fn main() -> ! {
 /// This is the first working prod function; the I2C-slave surface + sensor `measure()` come next.
 #[cfg(feature = "fr247x")]
 fn run_fr247x(p: &Peripherals) -> ! {
-    // P1SEL0 bits routing the eUSCI functions: P1.2/P1.3 → UCB0 I2C, P1.4/P1.5 → UCA0 UART.
-    const P1_EUSCI_PINS: u8 = 0x3C; // BIT2|BIT3|BIT4|BIT5
+    // Route only the UART pins (P1.4/P1.5 → UCA0) here — needed for `console`, harmless otherwise.
+    // The SENSOR I²C pins (P1.2/P1.3 → UCB0) are owned by the MODE machine: acquired in Sensing,
+    // released (tri-stated) in Passive. Never routed unconditionally, so a Passive node stays off the bus.
+    const P1_UART_PINS: u8 = 0x30; // BIT4|BIT5
 
     clock::init_1mhz(p);
-    // Route P1.2..P1.5 to the primary eUSCI function (SEL1=0, SEL0=1). NOTE: P1.4/P1.5 (UCA0 UART)
-    // are only needed for the `console` build; routing them unconditionally is harmless.
-    p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_EUSCI_PINS) });
-    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_EUSCI_PINS) });
-    i2c::init(p);
+    p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_UART_PINS) });
+    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_UART_PINS) });
 
     let model = model::detect();
 
-    // Scan + status ALWAYS run — they populate the debug registers (the machine-readable state the
-    // SoM reads over the I2C-slave surface). Only the UART reporting below is `console`-gated.
+    // Enter the boot-default operating mode. In Sensing this ACQUIRES the sensor bus (B0 master); in
+    // Passive it ensures the bus is RELEASED (the SoM owns it). Runtime-switchable below.
+    let mut mach = mode::ModeMachine::boot(p);
+
+    // Sensor scan runs ONLY in Sensing (Passive never masters the sensor bus). It populates the
+    // debug registers the SoM reads over the I2C-slave surface. UART reporting below is `console`-gated.
     #[allow(unused_mut)]
-    let mut last = enumerate::scan(p);
-    #[allow(unused_mut)]
-    let mut st = status::Status::from_scan(model, &last);
+    let mut last = if mach.is_sensing() {
+        enumerate::scan(p)
+    } else {
+        enumerate::Scan::absent()
+    };
+
+    // The Stem-bus I2C-slave surface (eUSCI_B1): the SoM reads this register file. `rf` holds the
+    // live status snapshot (+ PCA9698 shadow); `slave` is the per-transaction state. Polled below.
+    let mut rf = stem::RegFile::new(if mach.is_sensing() {
+        status::Status::from_scan(model, &last)
+    } else {
+        status::Status::booted(model) // Passive: not enumerated (didn't master the bus)
+    });
+    let mut slave = stem::Slave::new();
+    stem::init(p);
 
     // Dev observability: banner + human report + on-demand commands over the backchannel UART.
     #[cfg(feature = "console")]
@@ -128,37 +153,62 @@ fn run_fr247x(p: &Peripherals) -> ! {
         uart::puts(p, FW_BUILD);
         uart::puts(p, " (");
         uart::puts(p, model_name(model));
-        uart::puts(p, ") ==\n");
+        uart::puts(p, ") mode=");
+        uart::puts(p, mach.current().name());
+        uart::puts(p, " ==\n");
         if !model.matches_build_family() {
             uart::puts(p, "!! WRONG-FAMILY FLASH: this image is fr247x — detected part is not FR247x\n");
         }
-        uart::puts(p, "commands: s=scan  r=report  d=debug regs (0x30-0x3F)\n");
+        uart::puts(p, "commands: s=scan  r=report  d=debug regs  m=switch mode\n");
         enumerate::report(p, &last);
-        st.dump(p);
+        rf.status.dump(p);
         loop {
+            stem::poll(p, &mut slave, &mut rf); // service the SoM/Stem master
             if uart::rx_ready(p) {
                 match uart::getc(p) {
                     b's' | b'S' => {
-                        last = enumerate::scan(p);
-                        enumerate::report(p, &last);
-                        st = status::Status::from_scan(model, &last);
+                        if mach.is_sensing() {
+                            last = enumerate::scan(p);
+                            enumerate::report(p, &last);
+                            rf.status = status::Status::from_scan(model, &last);
+                        } else {
+                            uart::puts(p, "  (passive: not mastering the sensor bus)\n");
+                        }
                     }
                     b'r' | b'R' => enumerate::report(p, &last),
-                    b'd' | b'D' => st.dump(p),
+                    b'd' | b'D' => rf.status.dump(p),
+                    b'm' | b'M' => {
+                        let next = mach.current().toggled();
+                        mach.switch(p, next); // acquire/release the sensor bus for the new mode
+                        uart::puts(p, "mode -> ");
+                        uart::puts(p, mach.current().name());
+                        uart::putc(p, b'\n');
+                        if mach.is_sensing() {
+                            last = enumerate::scan(p);
+                            enumerate::report(p, &last);
+                            rf.status = status::Status::from_scan(model, &last);
+                        } else {
+                            last = enumerate::Scan::absent();
+                            uart::puts(p, "  sensor bus released (SoM owns it)\n");
+                            rf.status = status::Status::booted(model);
+                        }
+                    }
                     b'\r' | b'\n' => {}
-                    _ => uart::puts(p, "  (s=scan r=report d=debug)\n"),
+                    _ => uart::puts(p, "  (s=scan r=report d=debug m=mode)\n"),
                 }
             }
         }
     }
 
-    // Production (console off): state lives in the debug registers, served by the eUSCI_B1 I2C-slave
-    // (TODO). Until that's wired, idle — `last`/`st` are the state that surface will expose.
+    // Production (console off): state lives in the register file, served over the eUSCI_B1 I2C-slave
+    // surface. Poll it forever — this is the node's whole job until wake/INT logic lands.
     #[cfg(not(feature = "console"))]
     {
-        let _ = (&last, &st);
+        // Production: the boot-default mode is active (its entry action already ran in `boot`);
+        // runtime mode switches arrive over the register interface (TODO: SoM-facing mode register).
+        let _ = (&last, &mach);
         loop {
-            msp430::asm::nop();
+            stem::poll(p, &mut slave, &mut rf);
         }
     }
 }

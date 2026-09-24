@@ -21,7 +21,7 @@ cargo_cache := "-v msp430-cargo-registry:/opt/cargo/registry -v msp430-cargo-git
 #   mode:   auto (default) | native | fast | docker | docker-fast
 #   console: "console" (default; dev UART logging) | "" for a SILENT production image (smaller FRAM)
 # `-e PROD_BUILD` forwards a pinned stamp into the container; native path picks it up from the env.
-build family="fr247x" mode="auto" console="console":
+build family="fr247x" mode="auto" console="console" modes="":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{family}}" in
@@ -29,7 +29,13 @@ build family="fr247x" mode="auto" console="console":
         fr24xx) FRAM_BUDGET=15360; RAM_BUDGET=4096; FLOOR=512;;
         *) echo "unknown family '{{family}}' — use fr247x|fr24xx" >&2; exit 1;;
     esac
-    FEATS="{{family}}"; [ -n "{{console}}" ] && FEATS="$FEATS,{{console}}"
+    # Operating modes to compile in (DESIGN.md). Default per family: dual-I²C gets both (runtime-
+    # switchable); fr24xx is Passive-only (sensing needs a 2nd I²C). Override with the `modes` arg,
+    # e.g. `just prod build fr247x auto console mode-sensing` for a sensing-only image.
+    if [ -n "{{modes}}" ]; then MODES="{{modes}}"; else
+        case "{{family}}" in fr247x) MODES="mode-passive,mode-sensing";; fr24xx) MODES="mode-passive";; esac
+    fi
+    FEATS="{{family}},$MODES"; [ -n "{{console}}" ] && FEATS="$FEATS,{{console}}"
     feats="--no-default-features --features $FEATS"
     label="{{family}}$([ -n "{{console}}" ] && echo '+console' || echo ' silent')"
     # VARIANT = the family (+ '-silent' when console is off). cargo always writes the same binary name
@@ -45,6 +51,14 @@ build family="fr247x" mode="auto" console="console":
         art="prod/target/msp430-none-elf/$prof/prod-$variant"
         cp "$built" "$art"
         scripts/size-check.sh "$art" "$FRAM_BUDGET" "$RAM_BUDGET" "prod ($prof, $label) → $(basename "$art")" "$FLOOR"
+        # BENCHMARK the fr247x image against the PRODUCTION dual-I²C parts (FR2155/FR2355): 32 KB FRAM /
+        # 4 KB SRAM — the FR2476 dev board has 8 KB SRAM, HALF of which the shipped part won't have.
+        # Informational (never fails the dev build) — confirms the image fits what we actually ship.
+        # NOTE: fr215x/fr235x are not yet COMPILE targets — that needs the FR2155 PAC (svd2rust); see
+        # docs/MCU_SELECTION.md + NOTES.md. This is the size benchmark until then.
+        if [ "{{family}}" = fr247x ]; then
+            scripts/size-check.sh "$art" 32768 4096 "  ↳ benchmark vs FR2155/FR2355 (production 32K/4K)" 1024 || true
+        fi
     }
     if [ -f /.dockerenv ]; then
         case "{{mode}}" in *fast) prof=fast; flag="--profile fast";; *) prof=release; flag="--release";; esac
@@ -52,7 +66,7 @@ build family="fr247x" mode="auto" console="console":
         finish "$prof"
         exit 0
     fi
-    run_docker() { docker run --rm --platform linux/amd64 -e PROD_BUILD {{cargo_cache}} -v "$PWD":/work -w /work {{image}} just prod build {{family}} "$1" "{{console}}"; }
+    run_docker() { docker run --rm --platform linux/amd64 -e PROD_BUILD {{cargo_cache}} -v "$PWD":/work -w /work {{image}} just prod build {{family}} "$1" "{{console}}" "{{modes}}"; }
     mode="{{mode}}"
     if [ "$mode" = auto ]; then
         if scripts/native-available.sh; then mode=native

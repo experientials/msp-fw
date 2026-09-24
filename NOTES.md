@@ -187,6 +187,54 @@ schematic (`buttons.rs`).
         VL53L0X is present — `prod/src/enumerate.rs`.)
       - Bearing NOTE: single-zone ToF gives distance+trend but NO direction; "adjacent/passing" reads
         as a transient at ~constant range. True bearing needs a multi-zone ToF (VL53L5CX/L7CX).
+- [~] **Operating modes (Passive / Sensing / TBD)** — PLAN in `prod/DESIGN.md` (canonical statement 4
+      + "Operating modes"); SKELETON implemented & bench-verified. `prod/src/mode.rs`: `Mode` enum
+      (cfg'd variants), `default_boot`, `ModeMachine` with the sensor-bus **acquire/release** handoff
+      (→Sensing routes P1.2/3 + `i2c::init` B0 master; →Passive holds B0 in reset + tri-states pins).
+      Cargo features `mode-passive`/`mode-sensing` (≥1 required — compile_error); `mode-sensing` NOT
+      built for fr24xx (compile_error — Passive-only). prod.just per-family MODES default (fr247x=both,
+      fr24xx=passive). Wired into run_fr247x: boot the default mode, sensor scan gated on Sensing,
+      console `m` toggles mode. VERIFIED live: sensing default → `[7 found]`; passive → `(none)
+      [0 found]`, `status=0x01` (BOOTED-only, honest — Passive::booted status). Sizes fr247x console:
+      both 45 %, passive 44 %, sensing 44 %. **STILL OPEN (the FULL impl):** PMIC wake pin + the
+      monitor CONDITIONS that raise it (the reason Sensing exists), the SoM-facing mode REGISTER for
+      runtime switch (skeleton has console `m` only — can't drive it from the SoM yet), FRAM-persisted
+      default (INIT_CODE), mode 3, and the transition-sequencing safety around a live master.
+- [~] **eUSCI_B1 I²C-SLAVE surface (Stem bus → SoM)** — transport DONE, master-read verification
+      pending. `prod/src/stem.rs`: polled eUSCI_B1 slave @ 0x20 on P3.2/P3.6, dispatches the PCA9698
+      command-pointer + AI protocol onto a `RegFile`. Debug/identity window (0x30–0x3F) is REAL (via
+      `status::read_reg` — same bytes as the bench dump); GPIO banks (OP/IOC/PI/MSK) are coherent
+      firmware SHADOW; IP=0 and voltages=0 until the pin map + rail ADC land. Polled in both the
+      console command loop and the production idle loop. Verified: builds (silent 2192 B/6 %), boots,
+      sensor bus (B0/P1) unaffected, no hang. **NOT verified: a master actually reading it** — no
+      master on the Stem bus.
+      - CLOSE THE LOOP without the SoM: wire a **B0↔B1 loopback** (jumper P3.2→P1.2, P3.6→P1.3) — the
+        slave (0x20) then appears on the sensor bus and the B0 master can read its own DBG_IFACE
+        (0x30 → 0xD0), build id, etc. Could add a firmware self-test that triggers when 0x20 shows in
+        the scan. (Needs 2 jumper wires on the LaunchPad.)
+      - FOLLOW-UPS: physical GPIO backing (bank↔port pin map in `model::PinMap`); rail-ADC voltages
+        (0x2C/0x2D); STEM-MSG/INT notification side; confirm 0x20 vs I2C-API.md canonical address and
+        the CMD_AI bit position (regmap.rs TODO).
+- [~] **Benchmark/build against FR2155/FR2355 (production dual-I²C parts)** (Henrik, 2026-09-24).
+      DONE: every `just prod build fr247x` now ALSO benchmarks the image against the production budget
+      **FR2155/FR2355 = 32 KB FRAM / 4 KB SRAM** (informational, in `prod.just` finish()). KEY: the
+      FR2476 dev board has **8 KB SRAM but the shipped FR2155 has only 4 KB** (half) — the dev gate
+      alone would miss an SRAM overflow that bricks production. Current image fits easily (2 B SRAM).
+      Figures cited from `docs/MCU_SELECTION.md`: FR2155 32K/4K (baseline, ~95 LCSC), FR2355 32K/4K
+      (SAC, the **MSP-EXP430FR2355 dev LaunchPad** = strict superset to develop FR2155 on), FR2153/
+      FR2353 = 16K/2K cheaper alts.
+      TODO — make **fr215x a real COMPILE target** (`just prod build fr215x`):
+      - [x] **FR2155 + FR2355 PACs generated** (2026-09-24, `just pac gen msp430fr2155 msp430fr2355`)
+        → vendored `pac/msp430fr2155` + `pac/msp430fr2355`, compile-tested (`just pac check`). Both
+        confirmed dual-I²C (E_USCI_B0/B1) + dual eComp (E_COMP0/1); FR2355 adds SAC0..3.
+      - [ ] `memory-fr215x.x` (32 KB FRAM / 4 KB SRAM origins).
+      - [ ] model detection for the FR2155/FR2355 TLV device IDs (`model.rs`) — read the actual IDs
+        from the PAC TLV / a datasheet.
+      - [ ] family-cfg the hal/i2c/clock/stem for `fr215x` (add a `fr215x` feature + optional PAC dep;
+        the peripheral API matches FR2476 closely — E_USCI_B0/B1, ports — so cfg reuse should be high).
+      - [ ] prod.just family case `fr215x) 32768/4096` + MODES=both (`mode-sensing` allowed — dual-I²C).
+      No longer blocked on the SVD/PAC — remaining is the family-cfg wiring; a dev board only needed
+      for on-hardware sign-off.
 - [ ] **Firmware version must be reportable by inspecting the MSP** (Henrik, 2026-09-24). A register
       that a bus master can read to get the firmware version, AND — when console logging is on — the
       boot banner shows the firmware version number.

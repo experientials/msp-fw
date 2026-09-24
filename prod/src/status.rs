@@ -6,7 +6,7 @@
 //! surface); only the UART dump is `console`-gated. Populated from the sensor-bus enumeration + the
 //! compiled build stamp + the detected model. Additive to the PCA9698 facade (nothing touches 0x00–0x2A).
 
-#![allow(dead_code)] // read_reg's slave consumer isn't wired yet; fields serve both readers.
+#![allow(dead_code)] // some fields/paths serve the SoM's I2C-slave reads (stem::RegFile) not the bench dump.
 
 use crate::enumerate::Scan;
 use crate::model::Model;
@@ -86,6 +86,24 @@ impl Status {
             dev_count: scan.present.count() as u8,
             known_present: known,
             fault,
+        }
+    }
+
+    /// Booted, but the sensor bus was NOT scanned — used in **Passive** mode, where the MSP never
+    /// masters the sensor bus. BOOTED only (no ENUMERATED / BUS_OK), so the SoM doesn't read a false
+    /// enumeration. Identity/build still populated.
+    pub fn booted(model: Model) -> Self {
+        let mut status = flags::BOOTED;
+        if !model.matches_build_family() {
+            status |= flags::WRONG_FAMILY;
+        }
+        Self {
+            model_id: model.device_id(),
+            build_id: build_id(),
+            status,
+            dev_count: 0,
+            known_present: 0,
+            fault: 0,
         }
     }
 
