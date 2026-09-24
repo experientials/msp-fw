@@ -73,7 +73,12 @@ pub const DBG_STATUS: u8 = 0x37; // status flag bits (see status::flags)
 pub const DBG_DEV_COUNT: u8 = 0x38; // I²C devices found on the sensor bus (last scan)
 pub const DBG_KNOWN_PRESENT: u8 = 0x39; // bitmap over devices::KNOWN (bit i = KNOWN[i] present)
 pub const DBG_FAULT: u8 = 0x3A; // fault flags (reserved bits for now)
-// 0x3B..=0x3F reserved (read 0).
+// Firmware VERSION NUMBER (semantic, from Cargo.toml) — so the SoM reads the fw version by inspecting
+// the MSP over the slave surface. Distinct from the build-id hash (0x33–0x36).
+pub const DBG_FW_VER_MAJOR: u8 = 0x3B;
+pub const DBG_FW_VER_MINOR: u8 = 0x3C;
+pub const DBG_FW_VER_PATCH: u8 = 0x3D;
+// 0x3E..=0x3F reserved (read 0).
 
 /// Value returned at [`DBG_IFACE`] — lets a master detect the Thepia debug interface behind the
 /// PCA9698 facade. (`0xD0` = "debug regs, v0"; bump on an incompatible debug-layout change.)

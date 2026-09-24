@@ -3,7 +3,7 @@
 //! while retuning and waits for re-lock before switching the clocks — required for a clean 9600
 //! baud UART; the loose "close enough" version garbles the first bytes.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const SELREF_REFOCLK: u16 = 0x0010;
 const DCOFTRIMEN: u16 = 0x0080;

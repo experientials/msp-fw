@@ -54,6 +54,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "msp430fr2155"
+version = "0.1.0"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "msp430fr2355"
+version = "0.1.0"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
 name = "msp430fr2433"
 version = "0.1.0"
 dependencies = [
@@ -93,6 +107,8 @@ dependencies = [
  "embedded-hal",
  "msp430",
  "msp430-rt",
+ "msp430fr2155",
+ "msp430fr2355",
  "msp430fr2433",
  "msp430fr2476",
  "panic-msp430",

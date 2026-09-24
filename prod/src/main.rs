@@ -28,10 +28,10 @@ extern crate panic_msp430; // infinitely-looping panic handler (a hang trips the
 use msp430_rt::entry;
 
 // Family axis: exactly one family feature selects the PAC (and, via build.rs, the memory map).
-#[cfg(not(any(feature = "fr247x", feature = "fr24xx")))]
-compile_error!("prod: enable one family feature — `--features fr247x` (default) or `--features fr24xx`");
-#[cfg(all(feature = "fr247x", feature = "fr24xx"))]
-compile_error!("prod: enable exactly ONE family feature (fr247x XOR fr24xx), not both");
+#[cfg(not(any(feature = "_dual", feature = "fr24xx")))]
+compile_error!("prod: enable one family — fr247x (default) | fr215x | fr235x | fr24xx");
+#[cfg(all(feature = "_dual", feature = "fr24xx"))]
+compile_error!("prod: enable exactly ONE family — a dual-I²C family XOR fr24xx, not both");
 
 // OPERATING MODES (DESIGN.md): compile in ≥1 mode; sensing needs a 2nd I²C so it's dual-I²C only.
 #[cfg(not(any(feature = "mode-passive", feature = "mode-sensing")))]
@@ -39,38 +39,68 @@ compile_error!("prod: enable at least one mode — `--features mode-passive` and
 #[cfg(all(feature = "fr24xx", feature = "mode-sensing"))]
 compile_error!("prod: `mode-sensing` requires a dual-I²C family — FR2433 (fr24xx) is Passive-only");
 
+// PAC alias: the dual-I²C families share ALL the code (`_dual`); they differ only in which PAC is
+// selected here. Every module says `use crate::pac::Peripherals`, so adding a dual family is one arm.
 #[cfg(feature = "fr247x")]
-use msp430fr2476::Peripherals; // FR2476/FR2475 — dual-I²C (2× eUSCI_B)
+pub(crate) use msp430fr2476 as pac; // FR2476/FR2475
+#[cfg(feature = "fr215x")]
+pub(crate) use msp430fr2155 as pac; // FR2155 (production)
+#[cfg(feature = "fr235x")]
+pub(crate) use msp430fr2355 as pac; // FR2355 (dev LaunchPad)
+#[cfg(feature = "_dual")]
+use crate::pac::Peripherals; // dual-I²C (2× eUSCI_B)
 #[cfg(feature = "fr24xx")]
 use msp430fr2433::Peripherals; // FR2433 — single-I²C slave-only
 
 mod model; // Runtime MSP430 model detection + pin mapping (one image per compatible family).
 mod regmap; // I²C-slave register-map contract (PCA9698 emulation + Thepia extensions). See regmap.rs.
 
-// FR247x bring-up modules (the primary dev target). The FR24xx path is still the idle scaffold, so
-// these are cfg-gated to fr247x — they use the FR2476 PAC directly (the per-family bus glue). The
-// shared, portable device drivers live in `crates/devices`; only this glue is chip-specific.
-#[cfg(feature = "fr247x")]
+// DUAL-I²C bring-up modules — shared across all dual families (fr247x/fr215x/fr235x, the `_dual`
+// marker). They talk to the chip through the `pac` alias, so the SAME code serves every dual PAC; only
+// the alias differs. The FR24xx (single-I²C) path is a separate idle scaffold. Portable device drivers
+// live in `crates/devices`; only this glue is chip-specific.
+#[cfg(feature = "_dual")]
 mod clock;
-#[cfg(feature = "fr247x")]
+#[cfg(feature = "_dual")]
 mod hal;
-#[cfg(feature = "fr247x")]
+#[cfg(feature = "_dual")]
 mod i2c;
-#[cfg(feature = "fr247x")]
+#[cfg(feature = "_dual")]
 mod enumerate;
-#[cfg(feature = "fr247x")]
+#[cfg(feature = "_dual")]
 mod status;
-#[cfg(feature = "fr247x")]
+#[cfg(feature = "_dual")]
 mod mode;
-#[cfg(feature = "fr247x")]
+#[cfg(feature = "_dual")]
 mod stem;
 // UART logging is the `console` feature (dev only). Off = silent production image; state then lives
 // only in the debug registers (served by the I2C-slave surface). See status.rs / the console question.
-#[cfg(all(feature = "fr247x", feature = "console"))]
+#[cfg(all(feature = "_dual", feature = "console"))]
 mod uart;
 
 /// Compiled-in identity stamp (see build.rs). Printed at boot once the UART stub lands.
 const FW_BUILD: &str = env!("PROD_BUILD");
+
+/// Firmware VERSION NUMBER — semantic `major.minor.patch`, sourced from the crate version in
+/// `Cargo.toml` (bump it per release). Distinct from `FW_BUILD` (the git/build stamp): the version is
+/// the human-facing number, exposed both on the boot banner AND as debug registers `0x3B–0x3D` so the
+/// SoM can read the firmware version by inspecting the MSP over the I2C-slave surface.
+pub const FW_VERSION: &str = env!("CARGO_PKG_VERSION"); // "0.1.0"
+pub const FW_VER_MAJOR: u8 = parse_u8(env!("CARGO_PKG_VERSION_MAJOR"));
+pub const FW_VER_MINOR: u8 = parse_u8(env!("CARGO_PKG_VERSION_MINOR"));
+pub const FW_VER_PATCH: u8 = parse_u8(env!("CARGO_PKG_VERSION_PATCH"));
+
+/// const decimal parse (0..=255) — for the CARGO_PKG_VERSION_* fields at compile time.
+const fn parse_u8(s: &str) -> u8 {
+    let b = s.as_bytes();
+    let mut v = 0u8;
+    let mut i = 0;
+    while i < b.len() {
+        v = v.wrapping_mul(10).wrapping_add(b[i] - b'0');
+        i += 1;
+    }
+    v
+}
 
 // Watchdog control (common across MSP430 FRAM parts). WDTPW is the write password; WDTHOLD stops it.
 const WDTPW: u16 = 0x5A00;
@@ -88,7 +118,7 @@ fn main() -> ! {
     // a hang backstop (see diag/src/main.rs WDT_BACKSTOP) and pet it from the main loop. (The only
     // per-family delta in the scaffold: the WDT peripheral field name — fr247x `wdt_a` vs fr24xx
     // `watchdog_timer`; same UCS/WDTCTL register underneath.)
-    #[cfg(feature = "fr247x")]
+    #[cfg(feature = "_dual")]
     p.wdt_a.wdtctl().write(|w| unsafe { w.bits(WDTPW | WDTHOLD) });
     #[cfg(feature = "fr24xx")]
     p.watchdog_timer.wdtctl().write(|w| unsafe { w.bits(WDTPW | WDTHOLD) });
@@ -99,18 +129,18 @@ fn main() -> ! {
     // Keep the build stamp live for the family paths below.
     let _ = FW_BUILD;
 
-    #[cfg(feature = "fr247x")]
-    run_fr247x(&p);
+    #[cfg(feature = "_dual")]
+    run_dual(&p);
 
     #[cfg(feature = "fr24xx")]
     run_fr24xx(&p);
 }
 
-/// FR247x (FR2476/FR2475) node bring-up: clock → pins → UART → sensor-bus I2C master → boot banner →
-/// enumerate the bus → report state on demand over the backchannel UART (s = re-scan, r = re-report).
-/// This is the first working prod function; the I2C-slave surface + sensor `measure()` come next.
-#[cfg(feature = "fr247x")]
-fn run_fr247x(p: &Peripherals) -> ! {
+/// Dual-I²C node bring-up (fr247x/fr215x/fr235x — via the `pac` alias): clock → pins → sensor-bus I2C
+/// master → mode machine → OLED splash → boot banner → enumerate → report/serve state (UART commands +
+/// eUSCI_B1 slave). Same code for every dual family; only the PAC alias differs.
+#[cfg(feature = "_dual")]
+fn run_dual(p: &Peripherals) -> ! {
     // Route only the UART pins (P1.4/P1.5 → UCA0) here — needed for `console`, harmless otherwise.
     // The SENSOR I²C pins (P1.2/P1.3 → UCB0) are owned by the MODE machine: acquired in Sensing,
     // released (tri-stated) in Passive. Never routed unconditionally, so a Passive node stays off the bus.
@@ -135,6 +165,13 @@ fn run_fr247x(p: &Peripherals) -> ! {
         enumerate::Scan::absent()
     };
 
+    // OLED boot splash — only when we master the sensor bus (Sensing) and an OLED answered. Shows the
+    // fw version + boot verdict for ~5 s, then turns the panel OFF (blank). In Passive the OLED is the
+    // SoM's to drive, so we don't touch it.
+    if mach.is_sensing() {
+        oled_splash(p, &last);
+    }
+
     // The Stem-bus I2C-slave surface (eUSCI_B1): the SoM reads this register file. `rf` holds the
     // live status snapshot (+ PCA9698 shadow); `slave` is the per-transaction state. Polled below.
     let mut rf = stem::RegFile::new(if mach.is_sensing() {
@@ -149,7 +186,9 @@ fn run_fr247x(p: &Peripherals) -> ! {
     #[cfg(feature = "console")]
     {
         uart::init(p);
-        uart::puts(p, "\n== prod ");
+        uart::puts(p, "\n== prod v");
+        uart::puts(p, FW_VERSION); // human-facing version number (also debug regs 0x3B–0x3D)
+        uart::putc(p, b' ');
         uart::puts(p, FW_BUILD);
         uart::puts(p, " (");
         uart::puts(p, model_name(model));
@@ -157,7 +196,7 @@ fn run_fr247x(p: &Peripherals) -> ! {
         uart::puts(p, mach.current().name());
         uart::puts(p, " ==\n");
         if !model.matches_build_family() {
-            uart::puts(p, "!! WRONG-FAMILY FLASH: this image is fr247x — detected part is not FR247x\n");
+            uart::puts(p, "!! WRONG-FAMILY FLASH: detected part is not in this image's family\n");
         }
         uart::puts(p, "commands: s=scan  r=report  d=debug regs  m=switch mode\n");
         enumerate::report(p, &last);
@@ -213,12 +252,42 @@ fn run_fr247x(p: &Peripherals) -> ! {
     }
 }
 
-/// FR247x model name for the banner (no core::fmt on this budget).
-#[cfg(all(feature = "fr247x", feature = "console"))]
+/// Boot splash on a connected OLED: firmware version + boot success for ~5 s, then blank the panel
+/// (never leave it showing garbage / an uninitialised white raster). No-op if no OLED answered.
+/// Panel-parameterised via `devices::ssd1306` — swap `SSD1306_128X32` for another size as needed.
+#[cfg(feature = "_dual")]
+fn oled_splash(p: &Peripherals, scan: &enumerate::Scan) {
+    use devices::ssd1306::{Oled, SSD1306_128X32};
+    let oled = Oled::new(SSD1306_128X32);
+    if !scan.present.get(oled.addr()) {
+        return; // no OLED connected → nothing to show
+    }
+    let mut bus = crate::hal::EusciI2c::new(p);
+    if oled.init(&mut bus).is_err() {
+        return;
+    }
+    let _ = oled.clear(&mut bus);
+    let _ = oled.text(&mut bus, 0, 0, if scan.faulted { "PROD FAULT" } else { "PROD OK" });
+    if let Ok(c) = oled.text(&mut bus, 2, 0, "V") {
+        let _ = oled.text(&mut bus, 2, c, FW_VERSION);
+    }
+    // Hold ~5 s (30k nops ≈ 100 ms on the 1 MHz clock, ×50), then turn the display off.
+    for _ in 0..50u16 {
+        for _ in 0..30_000u16 {
+            msp430::asm::nop();
+        }
+    }
+    let _ = oled.off(&mut bus);
+}
+
+/// Model name for the banner (no core::fmt on this budget).
+#[cfg(all(feature = "_dual", feature = "console"))]
 fn model_name(m: model::Model) -> &'static str {
     match m {
         model::Model::Fr2476 => "FR2476",
         model::Model::Fr2475 => "FR2475",
+        model::Model::Fr2155 => "FR2155",
+        model::Model::Fr2355 => "FR2355",
         model::Model::Fr2433 => "FR2433",
         model::Model::Unknown(_) => "UNKNOWN",
     }

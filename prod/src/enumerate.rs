@@ -15,7 +15,7 @@ use devices::{
     vl53l0x::{Attention, RangeTracker, Vl53l0x, Vl53l0xRanging},
     Device, Error,
 };
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const LO: u8 = 0x08; // first 7-bit I2C address we scan
 const HI: u8 = 0x77; // last (0x00-0x07 and 0x78-0x7F are reserved)

@@ -10,11 +10,11 @@
 
 use crate::enumerate::Scan;
 use crate::model::Model;
-use crate::{regmap, FW_BUILD};
+use crate::{regmap, FW_BUILD, FW_VER_MAJOR, FW_VER_MINOR, FW_VER_PATCH};
 #[cfg(feature = "console")]
 use crate::uart;
 #[cfg(feature = "console")]
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 /// `DBG_STATUS` (0x37) flag bits.
 pub mod flags {
@@ -122,6 +122,9 @@ impl Status {
             regmap::DBG_DEV_COUNT => self.dev_count,
             regmap::DBG_KNOWN_PRESENT => self.known_present,
             regmap::DBG_FAULT => self.fault,
+            regmap::DBG_FW_VER_MAJOR => FW_VER_MAJOR,
+            regmap::DBG_FW_VER_MINOR => FW_VER_MINOR,
+            regmap::DBG_FW_VER_PATCH => FW_VER_PATCH,
             _ => 0,
         }
     }
@@ -153,6 +156,12 @@ impl Status {
         uart::hex8(p, self.status);
         uart::puts(p, " fault=0x");
         uart::hex8(p, self.fault);
+        uart::puts(p, " ver=");
+        uart::dec(p, FW_VER_MAJOR as u16);
+        uart::putc(p, b'.');
+        uart::dec(p, FW_VER_MINOR as u16);
+        uart::putc(p, b'.');
+        uart::dec(p, FW_VER_PATCH as u16);
         uart::putc(p, b'\n');
     }
 }

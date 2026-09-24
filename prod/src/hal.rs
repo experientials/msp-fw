@@ -9,7 +9,7 @@
 //! `crate::i2c::read_reg` (repeated-START). Added for the first `Device::measure` (APDS-9960).
 
 use embedded_hal::i2c::{self, ErrorType, I2c, Operation, SevenBitAddress};
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 /// Owns "the sensor I2C bus" for the device drivers. Just a `&Peripherals`, so it's `Copy`.
 #[derive(Clone, Copy)]

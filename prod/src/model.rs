@@ -19,6 +19,11 @@ const DEVICE_ID_ADDR: u16 = 0x1A04;
 const DEVICE_ID_FR2476: u16 = 0x832A; // FR247x (dual-I²C)
 const DEVICE_ID_FR2475: u16 = 0x832B; // FR247x (dual-I²C)
 const DEVICE_ID_FR2433: u16 = 0x8240; // FR24xx (single-I²C)
+// TODO(fr215x): read the real FR2155 / FR2355 Device IDs from their TLV (0x1A04) — off a board or
+// the datasheet — and replace these placeholders. Distinct sentinels so the match arms compile and
+// don't collide; detection won't classify real FR2155/FR2355 silicon correctly until filled.
+const DEVICE_ID_FR2155: u16 = 0xF215; // PLACEHOLDER — confirm on hardware
+const DEVICE_ID_FR2355: u16 = 0xF235; // PLACEHOLDER — confirm on hardware
 
 /// A recognised MSP430 model. `Unknown(id)` surfaces unrecognised silicon so boot can flag it rather
 /// than mis-map pins.
@@ -26,6 +31,8 @@ const DEVICE_ID_FR2433: u16 = 0x8240; // FR24xx (single-I²C)
 pub enum Model {
     Fr2476,
     Fr2475,
+    Fr2155,
+    Fr2355,
     Fr2433,
     Unknown(u16),
 }
@@ -35,6 +42,8 @@ impl Model {
         match id {
             DEVICE_ID_FR2476 => Model::Fr2476,
             DEVICE_ID_FR2475 => Model::Fr2475,
+            DEVICE_ID_FR2155 => Model::Fr2155,
+            DEVICE_ID_FR2355 => Model::Fr2355,
             DEVICE_ID_FR2433 => Model::Fr2433,
             other => Model::Unknown(other),
         }
@@ -45,6 +54,8 @@ impl Model {
         match self {
             Model::Fr2476 => DEVICE_ID_FR2476,
             Model::Fr2475 => DEVICE_ID_FR2475,
+            Model::Fr2155 => DEVICE_ID_FR2155,
+            Model::Fr2355 => DEVICE_ID_FR2355,
             Model::Fr2433 => DEVICE_ID_FR2433,
             Model::Unknown(id) => id,
         }
@@ -55,6 +66,8 @@ impl Model {
     pub fn matches_build_family(self) -> bool {
         match self {
             Model::Fr2476 | Model::Fr2475 => cfg!(feature = "fr247x"),
+            Model::Fr2155 => cfg!(feature = "fr215x"),
+            Model::Fr2355 => cfg!(feature = "fr235x"),
             Model::Fr2433 => cfg!(feature = "fr24xx"),
             Model::Unknown(_) => false,
         }
@@ -66,6 +79,8 @@ impl Model {
             // FR247x: 2× eUSCI_B → MCU-bus SLAVE + sensor-bus MASTER (dual-I²C node). 43 I/O over ports
             // P1–P6; reserve I²C/UART/STEM pins → ~5 GPIO banks exposed. Refine with connections.toml.
             Model::Fr2476 | Model::Fr2475 => PinMap { bank_count: 5, mcu_i2c: true, sensor_i2c: true },
+            // FR2155/FR2355: dual-I²C like FR247x (2× eUSCI_B). Bank count refined with the BOM.
+            Model::Fr2155 | Model::Fr2355 => PinMap { bank_count: 5, mcu_i2c: true, sensor_i2c: true },
             // FR2433: 1× eUSCI_B → MCU-bus SLAVE only, no sensor master. VQFN-24 ports P1–P3 → 3 banks.
             Model::Fr2433 => PinMap { bank_count: 3, mcu_i2c: true, sensor_i2c: false },
             // Unrecognised silicon: expose only the mandatory MCU slave until a real map is known.

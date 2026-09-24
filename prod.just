@@ -25,15 +25,16 @@ build family="fr247x" mode="auto" console="console" modes="":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{family}}" in
-        fr247x) FRAM_BUDGET=32768; RAM_BUDGET=8192; FLOOR=1024;;
-        fr24xx) FRAM_BUDGET=15360; RAM_BUDGET=4096; FLOOR=512;;
-        *) echo "unknown family '{{family}}' — use fr247x|fr24xx" >&2; exit 1;;
+        fr247x)        FRAM_BUDGET=32768; RAM_BUDGET=8192; FLOOR=1024;;  # FR2476 dev (8 KB SRAM)
+        fr215x|fr235x) FRAM_BUDGET=32768; RAM_BUDGET=4096; FLOOR=1024;;  # FR2155/FR2355 (4 KB SRAM)
+        fr24xx)        FRAM_BUDGET=15360; RAM_BUDGET=4096; FLOOR=512;;   # FR2433 single-I²C
+        *) echo "unknown family '{{family}}' — use fr247x|fr215x|fr235x|fr24xx" >&2; exit 1;;
     esac
     # Operating modes to compile in (DESIGN.md). Default per family: dual-I²C gets both (runtime-
     # switchable); fr24xx is Passive-only (sensing needs a 2nd I²C). Override with the `modes` arg,
     # e.g. `just prod build fr247x auto console mode-sensing` for a sensing-only image.
     if [ -n "{{modes}}" ]; then MODES="{{modes}}"; else
-        case "{{family}}" in fr247x) MODES="mode-passive,mode-sensing";; fr24xx) MODES="mode-passive";; esac
+        case "{{family}}" in fr247x|fr215x|fr235x) MODES="mode-passive,mode-sensing";; fr24xx) MODES="mode-passive";; esac
     fi
     FEATS="{{family}},$MODES"; [ -n "{{console}}" ] && FEATS="$FEATS,{{console}}"
     feats="--no-default-features --features $FEATS"

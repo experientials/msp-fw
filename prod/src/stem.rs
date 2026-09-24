@@ -19,7 +19,7 @@
 
 use crate::regmap::{self, ShadowState};
 use crate::status::Status;
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 /// eUSCI_B1 slave address. PCA9698 parts answer a strap-selected address in 0x20–0x27; we default to
 /// the group base. TODO(confirm-on-doc): pin this against I2C-API.md's canonical Stem-node address.

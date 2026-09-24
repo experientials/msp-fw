@@ -2,7 +2,7 @@
 //! TX ported from diag's proven uart.rs; RX added so a char on the backchannel triggers a re-scan.
 //! Pins routed in main (P1.4/P1.5 → UCA0).
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const UCSWRST: u16 = 0x0001;
 const UCSSEL_SMCLK: u16 = 0x0080;

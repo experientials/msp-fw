@@ -200,6 +200,13 @@ schematic (`buttons.rs`).
       monitor CONDITIONS that raise it (the reason Sensing exists), the SoM-facing mode REGISTER for
       runtime switch (skeleton has console `m` only — can't drive it from the SoM yet), FRAM-persisted
       default (INIT_CODE), mode 3, and the transition-sequencing safety around a live master.
+      - **PMIC wake DESIGNED** (2026-09-24, from the NXP source of truth `PCA9450DS.pdf` rev 2.2, not
+        the outdated carrier wiring): the MSP **is** the I/O expander (FR2155/FR2476 replace the old
+        PCA9555 + Faceboard FR2032 expanders), so wake = MSP drives its `PMIC_ON_REQ` **OP-bank bit**
+        high. PCA9450 rules: assert HIGH + HOLD > `tON_DEB` (a level, not a pulse); masked until
+        `RTC_RESET_B` (~40 ms post-cold-VSYS); 1.8 V SNVS input → MSP drives **open-drain to NVCC_SNVS**
+        (never push-pull 3.3 V). Full plan: `prod/DESIGN.md` "How the wake is hooked up"; pin `som_wake`
+        (TBD, open-drain) in `connections.toml`. Remaining = assign the pin + reserve the OP/IP bits.
 - [~] **eUSCI_B1 I²C-SLAVE surface (Stem bus → SoM)** — transport DONE, master-read verification
       pending. `prod/src/stem.rs`: polled eUSCI_B1 slave @ 0x20 on P3.2/P3.6, dispatches the PCA9698
       command-pointer + AI protocol onto a `RegFile`. Debug/identity window (0x30–0x3F) is REAL (via
@@ -223,19 +230,30 @@ schematic (`buttons.rs`).
       Figures cited from `docs/MCU_SELECTION.md`: FR2155 32K/4K (baseline, ~95 LCSC), FR2355 32K/4K
       (SAC, the **MSP-EXP430FR2355 dev LaunchPad** = strict superset to develop FR2155 on), FR2153/
       FR2353 = 16K/2K cheaper alts.
-      TODO — make **fr215x a real COMPILE target** (`just prod build fr215x`):
-      - [x] **FR2155 + FR2355 PACs generated** (2026-09-24, `just pac gen msp430fr2155 msp430fr2355`)
-        → vendored `pac/msp430fr2155` + `pac/msp430fr2355`, compile-tested (`just pac check`). Both
-        confirmed dual-I²C (E_USCI_B0/B1) + dual eComp (E_COMP0/1); FR2355 adds SAC0..3.
-      - [ ] `memory-fr215x.x` (32 KB FRAM / 4 KB SRAM origins).
-      - [ ] model detection for the FR2155/FR2355 TLV device IDs (`model.rs`) — read the actual IDs
-        from the PAC TLV / a datasheet.
-      - [ ] family-cfg the hal/i2c/clock/stem for `fr215x` (add a `fr215x` feature + optional PAC dep;
-        the peripheral API matches FR2476 closely — E_USCI_B0/B1, ports — so cfg reuse should be high).
-      - [ ] prod.just family case `fr215x) 32768/4096` + MODES=both (`mode-sensing` allowed — dual-I²C).
-      No longer blocked on the SVD/PAC — remaining is the family-cfg wiring; a dev board only needed
-      for on-hardware sign-off.
-- [ ] **Firmware version must be reportable by inspecting the MSP** (Henrik, 2026-09-24). A register
+      **fr215x / fr235x are now REAL build targets** (2026-09-24) — `just prod build fr215x` / `fr235x`
+      compile + gate against the FR2155/FR2355 PACs.
+      - [x] **FR2155 + FR2355 PACs generated + vendored** (`just pac gen`), compile-tested. Dual-I²C
+        (E_USCI_B0/B1) + dual eComp; FR2355 adds SAC0..3.
+      - [x] `memory-fr215x.x` (32 KB / 4 KB — shared by fr215x + fr235x; from the TI ld scripts).
+      - [x] **Family sharing via a `_dual` marker + a `pac` alias** (main.rs): fr247x/fr215x/fr235x
+        all enable `_dual` and share ALL the dual-I²C code; each just selects its PAC (`pub(crate) use
+        msp430fr2476/msp430fr2155/msp430fr2355 as pac`). Every module uses `crate::pac::Peripherals`.
+        The FR2155/FR2355 APIs matched FR2476 closely enough that the shared code compiled UNCHANGED.
+      - [x] prod.just family case (32768/4096, MODES=both), build.rs memory/target, compile guards,
+        `model.rs` Fr2155/Fr2355 variants + PinMap. Family-unique artifacts `prod-fr215x`/`prod-fr235x`
+        (stamps target `fr2155`/`fr2355`). Sizes ~49 % console / 10 % silent.
+      - [ ] **Model TLV device IDs are PLACEHOLDERS** (`DEVICE_ID_FR2155=0xF215`, `FR2355=0xF235`) —
+        read the real IDs off an FR2155/FR2355 board (or datasheet) and fill `model.rs`, else runtime
+        wrong-family detection misfires. Runtime/on-hardware sign-off needs the FR2355 dev board.
+- [~] **Firmware version reportable by inspecting the MSP** (Henrik, 2026-09-24) — DONE for register
+      + console; OLED remains. Semantic `major.minor.patch` from the Cargo.toml crate version
+      (`FW_VERSION`/`FW_VER_*` in main.rs, const-parsed from `CARGO_PKG_VERSION*`). Exposed as debug
+      regs **0x3B/0x3C/0x3D** (major/minor/patch — the SoM reads the fw version over the I2C-slave
+      surface) and on the boot banner (`== prod v0.1.0 …`) + the `d` dump (`ver=0.1.0`). Verified live:
+      banner `v0.1.0`, regs `00 01 00`. Distinct from the build-id hash (0x33–0x36). Bump the version
+      by bumping `prod/Cargo.toml` `version`.
+      - [ ] STILL TODO: **show the version on the OLED for ~5 s at boot** (Henrik's idea) — needs the
+        SSD1306 driver ported into `crates/devices` (diag has `ssd1306_raw.rs`) + minimal text render. A register
       that a bus master can read to get the firmware version, AND — when console logging is on — the
       boot banner shows the firmware version number.
       - What EXISTS today: boot console prints the full build stamp (`PROD_BUILD`/`DIAG_BUILD`, e.g.

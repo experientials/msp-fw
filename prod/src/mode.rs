@@ -12,7 +12,7 @@
 
 #![allow(dead_code)] // some paths are unused depending on which mode features are compiled in.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const SENSOR_PINS: u8 = 0x0C; // P1.2 (UCB0SDA) | P1.3 (UCB0SCL) — the sensor-master bus
 const UCSWRST: u16 = 0x0001;

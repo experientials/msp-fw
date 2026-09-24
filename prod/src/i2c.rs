@@ -5,7 +5,7 @@
 //! NOTE: on the FR247x this is the *sensor-master* bus. The MCU-bus I2C SLAVE surface (eUSCI_B1,
 //! answering the SoM) is a separate driver — not this file.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const UCSWRST: u16 = 0x0001;
 const UCMODE_3: u16 = 0x0600;
