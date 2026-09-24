@@ -114,13 +114,66 @@ its one bus is the MCU-bus slave; it has no separate sensor-master bus ([[msp-fw
 `compile_error!` when `fr24xx` + `mode-sensing` are combined) — so an FR2433 image is Passive-only and
 can never attempt to master the bus.
 
-**Open questions (must resolve before implementing):**
+### How the wake is hooked up (PMIC path — designed from the NXP source of truth)
+
+**The MSP *is* the I/O expander — it replaces the old discrete expanders.** In the Stem architecture
+the MSP (this firmware, emulating a PCA9698 — `src/regmap.rs`) *is* the system's I/O expander. The
+production **FR2155** / dev **FR2476** running this firmware **replace the `PCA9555` + Faceboard `FR2032`
+expanders** of the old designs (`ziloo/Hardware/pinouts/I2C_EXPANDER_*.md`, `.../929/Faceboard/*`) — same
+job (I²C GPIO expansion + PMIC/wake control), now one smart supervisor MCU instead of dumb expanders +
+a helper MCU. So the SoM's PMIC control lines are the MSP's own GPIO pins, exposed as **OP-bank output
+bits** in the register map, and "wake the SoM" = **the MSP drives its `PMIC_ON_REQ` OP bit high** — no
+external expander in the path. Treat the old carrier's discrete-expander PMIC wiring as **outdated
+reference only**, not the target design.
+
+**PMIC = NXP PCA9450.** Design facts taken from the source of truth, `ziloo/Hardware/datasheets/i.MX8/
+PCA9450DS.pdf` (rev 2.2, 2021-09-15) — not the carrier netlist:
+
+- **`PMIC_ON_REQ` (pin 39, digital input):** *"PMIC ON input from Application processor. When it is
+  asserted high, the device starts power on sequence."* (Table 3.) → assert HIGH to power on / resume.
+- **It is a LEVEL, held — not a pulse.** §7.3.4 PWRUP: power-up starts *"when `PMIC_ON_REQ` is asserted
+  high **for longer than debounce time, `tON_DEB`, which is programmable in the `PWR_CTRL` reg**."* So
+  the MSP must drive it high **and hold it** past `tON_DEB`; keeping the SoM on = keep it high.
+- **Masked until `RTC_RESET_B` is released** in SNVS mode (§7.3.3): after cold VSYS, the PMIC needs
+  ~`tSNVS_PU` 20 ms + `tRTC_RST` 20 ms before it will accept `PMIC_ON_REQ` — the MSP can't wake it
+  instantly at first power. Full SNVS timing in Table 5.
+- **Standby / reset companions:** `PMIC_STBY_REQ` (pin 40, DI) high → STANDBY; `SYS_RST_PMIC` low →
+  reset; `POR_B` is the PMIC's power-on-reset **output** (→ an MSP **IP**-bank input bit).
+- **Electrical — the real design constraint:** `PMIC_ON_REQ` lives in the **1.8 V SNVS (always-on)
+  domain** (LDO1 `NVCC_SNVS` = 1.8 V). The MSP's I/O rail is ~3.3 V, so driving it directly would
+  over-drive a 1.8 V input. Design it as **open-drain to `NVCC_SNVS` (1.8 V) with a pull-up, or a
+  level translator** — the MSP OP bit pulls the line, the 1.8 V rail sets the high level. Confirm
+  `V_IH`, `tON_DEB` default, and the pull against `PCA9450DS.pdf` before choosing the MSP pin/drive.
+
+**Register-map integration (the firmware hook).** Reserve named OP-bank bits for the PMIC lines
+(`PMIC_ON_REQ`, `PMIC_STBY_REQ`, `SYS_RST_PMIC`) and an IP bit for `POR_B`, in the emulated-expander
+space. Then: waking = set the `PMIC_ON_REQ` OP bit (held); the SoM, once up, can read the same bits over
+the Stem I²C slave. This folds the whole power state machine into the register interface already built.
+
+**The handshake (how the MSP knows when to act).** `SOUND_INT` (SoM `GPIO1_IO00` → carrier **P20.12**)
+is the SoM→MSP "**M7 active / suspended**" cue — the SoM has slept, so the MSP takes the sensor bus
+(enters Sensing). `STEM_INT` (SoM `GPIO1_IO01` → **P20.14**) is the MSP→SoM notify line. Round-trip:
+  1. SoM sleeps → asserts `SOUND_INT` (and/or writes the mode register) → MSP enters **Sensing**, acquires the sensor bus.
+  2. MSP monitors; a **wake condition** fires → MSP sets `PMIC_ON_REQ` OP bit high (held > `tON_DEB`) → PCA9450 powers the SoM up.
+  3. SoM resumes → reads captured state over the Stem I²C slave → commands **Passive** → MSP releases the bus.
+
+**Wake conditions (the "particular conditions"):** already implemented as trigger logic —
+`devices::vl53l0x::{RangeTracker, Attention}` (approach/threshold), APDS proximity, RCWL-0516 radar on
+P2.4 (port-interrupt / wake-from-LPMx.5); NFC field-detect as a secondary always-on wake into the MSP.
+
+**Still to assign:** the concrete MSP port pin for the `PMIC_ON_REQ` OP bit (open-drain-capable, per
+above) → `connections.toml som_wake`. Everything else — the PMIC behaviour, the level/timing rules, the
+register-map home — is now designed from the datasheet.
+
+**Open questions (remaining before the FULL mode-machine impl):**
 1. **Mode 3** — undefined.
-2. **PMIC wake signal** — which pin, level vs pulse vs latched, and the exact "particular conditions"
-   (thresholds on approach/proximity/motion). Ties to the tracked "prove one wake-on-event source" TODO.
+2. **Wake line residuals** — assign the MSP `som_wake` GPIO + confirm the PCA9450 `PMIC_ON_REQ` V_IH /
+   pulse spec and the 3.3 V→1.8 V translation (see "How the wake is hooked up"). The *path* is resolved;
+   these are the electrical/pin details.
 3. **Passive sensor access** — does the SoM master the sensor bus directly (shared wiring), or are the
    sensors simply dormant while Passive? (Hardware-topology dependent.)
-4. **Default/boot mode** and the exact **mode register** + persistence scheme.
+4. **Default/boot mode** and the exact **mode register** + persistence scheme (candidate: a Thepia-ext
+   register; `SOUND_INT` may also drive the Passive↔Sensing transition directly).
 5. **Transition sequencing / bus-handoff protocol** so the SoM and MSP never both master the sensor bus.
 
 ### Boot logic (the "basic boot logic" required)

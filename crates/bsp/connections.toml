@@ -172,6 +172,17 @@ status   = "planned"
 net      = "sensor INT (e.g. APDS-9960 / IMU)"
 notes    = "assign a port pin with interrupt capability"
 
+[[connection]]
+id       = "som_wake"
+signal   = "SoM wake — PMIC_ON_REQ OP-bank bit (the MSP IS the I/O expander)"
+pin      = "TBD"
+function = "GPIO"
+module   = "PORT"
+dir      = "out"
+status   = "planned"
+net      = "MSP GPIO / regmap OP-bank bit → PCA9450 PMIC_ON_REQ (assert HIGH to power-on the SoM). MSP replaces the old PCA9555/FR2032 expanders."
+notes    = "Design per NXP PCA9450DS.pdf rev 2.2 (source of truth), NOT the outdated carrier wiring — see prod/DESIGN.md 'How the wake is hooked up'. PMIC_ON_REQ is a 1.8 V SNVS digital input: assert HIGH and HOLD it longer than tON_DEB (programmable debounce, PWR_CTRL) — a held LEVEL, not a pulse; masked until RTC_RESET_B released (~40 ms after cold VSYS). The MSP's ~3.3 V I/O must drive it OPEN-DRAIN to NVCC_SNVS (1.8 V) or via a level translator — never push-pull 3.3 V into the 1.8 V input. Companions (also OP bits): PMIC_STBY_REQ (standby), SYS_RST_PMIC (reset); POR_B = an IP-bank input. Pick an open-drain-capable port pin. Handshake: SOUND_INT (P20.12)=SoM→MSP 'M7 suspended' cue to enter Sensing; STEM_INT (P20.14)=MSP→SoM notify."
+
 # ---------------------------------------------------------------------------
 # RESERVED — programming/debug, not general I/O
 # ---------------------------------------------------------------------------
