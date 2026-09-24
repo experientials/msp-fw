@@ -1,0 +1,48 @@
+[package]
+name = "prod"
+version = "0.1.0"
+edition = "2021"
+description = "bob-929 Stembus node firmware (Rust) — family axis: FR247x (default) + FR24xx"
+
+# COMPILE-TIME FAMILY AXIS (one image per register/memory-compatible family — see DESIGN.md).
+# Exactly one family feature is active; it selects the PAC + memory map (build.rs) + gate budget
+# (prod.just). This is how BOTH production families stay first-class — `fr247x` is just the default
+# (the on-hand dev boards), NOT the only supported target.
+[features]
+default = ["fr247x", "console"]
+# FR247x (FR2476/FR2475) — DUAL-I²C (2× eUSCI_B → Stem SLAVE + local sensor MASTER). Primary dev
+# target (dev boards on hand); production dual-I²C part is the FR2155 (a future fr215x family).
+fr247x = ["dep:msp430fr2476"]
+# FR24xx (FR2433) — SINGLE-I²C slave-only expander. The cheap, small, well-stocked production node.
+fr24xx = ["dep:msp430fr2433"]
+# `console` — dev-only UART logging (banner + enumerate report + debug-register dump + s/r/d). OFF =
+# silent production image; the node's state then lives only in the debug registers / I2C-slave
+# surface (smaller FRAM, no UART clocking). Orthogonal to the family axis. On by default for dev.
+console = []
+
+[dependencies]
+msp430 = "0.4"
+msp430-rt = "0.4"
+panic-msp430 = "0.4"
+# Family PACs are optional; the active family feature pulls exactly one in (see [features]).
+msp430fr2476 = { path = "../pac/msp430fr2476", optional = true }
+msp430fr2433 = { path = "../pac/msp430fr2433", optional = true }
+sched = { path = "../crates/sched" }
+# Shared per-device drivers (one module per sensor, standard Device convention) — used by both diag
+# and prod via the embedded-hal I2c seam. Family-agnostic; the FR247x bus impl is prod/src/hal.rs.
+devices = { path = "../crates/devices" }
+# embedded-hal 1.0 — trait definitions only (no code); an unused impl is stripped by LTO, so it
+# costs ~0 ROM. The portability seam for the shared crates/devices drivers.
+embedded-hal = "1.0"
+
+# opt-level "s" + LTO: size wins over speed (the FRAM budget is the point). The gate
+# (`just prod build`) fails the build if the footprint exceeds the active family's budget.
+[profile.release]
+opt-level = "s"
+lto = true
+
+# Fast-iteration profile: same size-opt, NO LTO, for a quicker edit→flash loop. Larger than
+# release — may exceed the budget; that's expected. Ship only `release` (LTO), which the gate checks.
+[profile.fast]
+inherits = "release"
+lto = false

@@ -4,9 +4,19 @@ MSP430 firmware for the Thepia **bob-929 / ziloo** hardware — a low-power **su
 extender** that monitors rails/signals while the main board sleeps and exposes its GPIO to a host
 over I²C.
 
-The current focus is [`diag/`](diag/) — a Rust power-on self-test (POST) that scans the I²C sensor
-bus and exercises each known device. Production part is the **FR2433**; the **FR2476** is the dev
-board and the battery/rail-monitoring variant.
+Two firmware crates:
+
+- [`diag/`](diag/) — the bring-up ROM: a Rust power-on self-test (POST) that scans the I²C sensor
+  bus and exercises each known device. Runs on the **FR2476** dev part (32 KB FRAM, 8 KB SRAM).
+- [`prod/`](prod/) — the shipping **Stembus Expander** firmware for the product-baseline **FR2433**
+  (15 KB program FRAM, 4 KB SRAM). An I²C **slave** exposing local GPIO/ADC to the SoM — *not* the
+  central supervisor (that's the FR2476's 2× I²C role; see
+  [ziloo/…/STEM-EXPANDER.md](../../ziloo/Hardware/stem/STEM-EXPANDER.md)). Currently a scaffold;
+  `just prod build` enforces the 15 KB budget so it can never silently outgrow the part.
+
+Production baseline part is the **FR2433**; the **FR2476** is the dev board and the
+battery/rail-monitoring supervisor part. Both builds are footprint-gated in CI
+([scripts/size-check.sh](scripts/size-check.sh)).
 
 > New here? Read [TOOLCHAIN.md](TOOLCHAIN.md) (tooling) and [diag/DESIGN.md](diag/DESIGN.md) (the
 > firmware model). Pin assignments live in [crates/bsp/connections.toml](crates/bsp/connections.toml).

@@ -16,7 +16,10 @@
 
 [chip]
 part      = "MSP430FR2476"
-package   = "RHB VQFN-40"          # confirm against the unit on the bench
+# NOTE: "RHB VQFN-40" was inconsistent — per the datasheet (§ package options) RHB is the **32-pin**
+# VQFN; the **40-pin** VQFN is **RHA** (48-pin is PT/LQFP). Confirm the actual package on the bench
+# unit and set this to one of: "PT LQFP-48" | "RHA VQFN-40" | "RHB VQFN-32".
+package   = "RHA VQFN-40?"          # PROVISIONAL — confirm against the unit on the bench
 datasheet = "datasheets/msp430fr2476.pdf"
 
 # ---------------------------------------------------------------------------
@@ -124,25 +127,27 @@ notes    = "HARDWARE.md: P1.7 -> CHARGE"
 
 [[connection]]
 id       = "stem_sda"
-signal   = "Stem I2C SDA"
-pin      = "P3.2?"                  # candidate UCB1SIMO/UCB1SDA
-function = "UCB1SDA?"
+signal   = "Stem I2C SDA (MCU = SLAVE; SoM/RP2040 masters)"
+pin      = "P3.2"
+function = "UCB1SDA"
 module   = "eUSCI_B1"
+sel      = "SEL0"
 dir      = "bidir"
 status   = "planned"
-net      = "Stem bus to host/other MCUs"
-notes    = "second I2C so Stem is independent of the sensor bus; confirm pins"
+net      = "Stem bus to SoM/other MCUs — the PCA9698 register + debug surface (prod/src/regmap.rs)"
+notes    = "PINS CONFIRMED against datasheet (P3.2 = UCB1SIMO/UCB1SDA), present on the 48/40/32-pin tables. Alternate mux: P4.4 = UCB1SDA. Shares the pin with UCB1SIMO (SPI) — mutually exclusive. Verify P3.2 is broken out to a header on the LaunchPad before bench-wiring."
 
 [[connection]]
 id       = "stem_scl"
-signal   = "Stem I2C SCL"
-pin      = "P3.6?"                  # candidate UCB1SOMI/UCB1SCL
-function = "UCB1SCL?"
+signal   = "Stem I2C SCL (MCU = SLAVE)"
+pin      = "P3.6"
+function = "UCB1SCL"
 module   = "eUSCI_B1"
+sel      = "SEL0"
 dir      = "bidir"
 status   = "planned"
 net      = "Stem bus"
-notes    = "confirm pins against datasheet"
+notes    = "PINS CONFIRMED against datasheet (P3.6 = UCB1SOMI/UCB1SCL). Alternate mux: P4.3 = UCB1SCL. Shares the pin with UCB1SOMI (SPI). Verify P3.6 header availability on the LaunchPad."
 
 [[connection]]
 id       = "stem_msg"

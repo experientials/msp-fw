@@ -1,0 +1,18 @@
+# Project hardware config for `thepia hwd` (searched by walking up from the cwd).
+# Hardware-scoped on purpose — this is not a broad `thepia.toml`.
+#
+# [msp] declares the MSP430 flashing defaults for this repo. Declaring `family` EARNS the
+# cross-family guard: `thepia hwd msp flash` checks the declared family against the board's
+# detected part (its runtime TLV device-id) and refuses a mismatch. The guard is a declaration
+# check, not image inspection — so the pinned `image` must be a family-unique artifact that can't
+# be silently overwritten by a build of the other family. `just prod build <family>` emits exactly
+# that: `prod-<family>` (see prod.just). The board's runtime build-id/stamp (verify-by-stamp) is the
+# authoritative counterpart once flashed.
+#
+# Resolution precedence: CLI flag > this config > (no image → error with advice; no family → no guard).
+
+[msp]
+# Primary dev target on the bench today: FR2476 (fr247x family). Change per the attached board.
+family = "fr247x"
+# Family-unique release artifact from `just prod build fr247x` (NOT the clobberable bare `prod`).
+image  = "prod/target/msp430-none-elf/release/prod-fr247x"

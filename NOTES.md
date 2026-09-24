@@ -162,8 +162,47 @@ schematic (`buttons.rs`).
       Rust target supports `-mlarge` and that flashing upper FRAM (0x10000+) works. **Unblocks
       restoring the graphics stack without any trim** (chose option B — defer, not rushed). Timebox
       an investigation before committing.
-- [ ] **MC6470**: verify chip-ID registers vs datasheet → add WHO_AM_I (gravity-sanity done).
-- [ ] **VL53L0X**: range-a-target exercise (mm + status), beyond ID-only.
+- [x] **MC6470**: mag WHO_AM_I + liveness DONE. Fetched the mCube datasheet (APS-048-0033v1.7);
+      magnetometer (0x0C) now a shared Device `Mc6470Mag` — `identify` = "Who I am" 0x0F==0x49,
+      `measure` = active/force (CTRL1 PC=1, CTRL3 FORCE) → poll STATUS.DRDY → signed-LE OUTX/Y/Z,
+      0.15 µT/LSB. Verified live: `id ok  |B|=39.75uT` (plausible Earth field). Accel WHO_AM_I (§9
+      chip-ID) still available to strengthen the accel `identify` beyond register-response — minor
+      follow-up.
+- [~] **VL53L0X**: identity + coarse ranging + approach classifier DONE in code & verified on a
+      static target; live approach/recede trend UNVERIFIED (needs a proper sensor mount).
+      - `crates/devices/src/vl53l0x.rs`: identity `Device` (`identify` 0xC0==0xEE); `Vl53l0xRanging`
+        (stateful handle) = minimal single-shot ranging **ported from Pololu's VL53L0X lib** (faithful
+        reduction of ST's API): DataInit + SPAD/ref setup + default tuning blob + ref calibration,
+        then single-shot `read_range` (mm). **Deliberately SKIPS** the measurement-timing-budget recalc
+        (~200 lines of Q-format timing math) — tuning defaults range fine for coarse use; accuracy is
+        uncalibrated by design.
+      - `RangeTracker` + `Attention` = the SUPERVISOR wake-on-approach primitive: 8-sample ring, mean
+        older-half vs newer-half → Approaching / Receding / Stationary / NoTarget, plus a `near_mm`
+        threshold. Integer-only.
+      - Verified live on FR2476: init OK, `read_range` gives steady plausible mm (~68–90 mm on a fixed
+        bench object), classifier correctly = `stationary NEAR`. **NOT yet verified:** the trend under
+        motion — the bench sensor is occluded by a fixed object ~7 cm in front (single-zone ToF reports
+        the nearest thing), so a hand behind it isn't seen. NEEDS a proper sensor mount aimed at open
+        space to confirm APPROACHING/receding flips. (Prod console runs a ~5 s sample burst when the
+        VL53L0X is present — `prod/src/enumerate.rs`.)
+      - Bearing NOTE: single-zone ToF gives distance+trend but NO direction; "adjacent/passing" reads
+        as a transient at ~constant range. True bearing needs a multi-zone ToF (VL53L5CX/L7CX).
+- [ ] **Firmware version must be reportable by inspecting the MSP** (Henrik, 2026-09-24). A register
+      that a bus master can read to get the firmware version, AND — when console logging is on — the
+      boot banner shows the firmware version number.
+      - What EXISTS today: boot console prints the full build stamp (`PROD_BUILD`/`DIAG_BUILD`, e.g.
+        `fr2476/2026.dev-ac40511-dirty.<secs>`); debug regs `0x33–0x36` hold a 32-bit **FNV build-id**
+        (a hash of that stamp), currently console-visible via the `d` dump.
+      - GAPS to close: (1) the register value is a *hash*, not a human **version number** — decide
+        the scheme (semantic `PROD_RELEASE` semver, or a monotonic version int) and expose it in a
+        dedicated, documented register (e.g. a `DBG_VERSION`/`FW_VERSION` field, stable across the
+        family). (2) The build-id/version is only console-readable until the **eUSCI_B1 I²C-slave
+        surface** is wired — "inspect the MSP over the bus" depends on that. (3) Console boot should
+        print a clean version number (not only the dev build stamp) when a real release is set.
+      - IDEA (Henrik, 2026-09-24): in **prod**, if an OLED is connected (SSD1306 @0x3C), **show the
+        version number on it for ~5 s at boot** — a human-readable version surface with no console or
+        bus master needed. Reuse diag's `ssd1306_raw.rs` (port into `crates/devices` as a shared
+        display driver, consistent with the per-device convention).
 - [ ] **Rail ADC** (VSOM P1.6 / CHARGE P1.7) + thresholds — the supervisor's core health check;
       also unlocks the thermal/power stress rung.
 - [ ] **Prove one wake-on-event source** (RCWL P2.4 port interrupt, or a sensor INT) — the

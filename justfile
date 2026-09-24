@@ -26,6 +26,7 @@ mod check
 mod example
 mod pac
 mod diag
+mod prod
 mod usb
 
 default:

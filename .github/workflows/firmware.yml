@@ -20,8 +20,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build (same just recipe as local dev)
+      - name: Build examples (same just recipe as local dev)
         run: just build          # inside the container → detects /.dockerenv → builds natively
+
+      - name: Build diag (FR2476) — gated at 32 KB FRAM / 8 KB SRAM
+        run: just diag build     # size-check.sh fails the job on overflow
+
+      # Both prod families are first-class — build and gate each. `just prod build` now emits a
+      # variant-unique artifact `prod-<family>` (cargo's shared `prod` path is still clobbered per
+      # build, but the suffixed copy is stable), so no hand-copy is needed here.
+      - name: Build prod fr247x (FR2476/FR2475 dual-I²C) — gated 32 KB / 8 KB
+        run: just prod build fr247x
+
+      - name: Build prod fr24xx (FR2433 single-I²C) — gated 15 KB / 4 KB
+        run: just prod build fr24xx
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -30,4 +42,7 @@ jobs:
           path: |
             examples/hello-c/build/*.elf
             examples/hello-rust/target/msp430-none-elf/release/hello-rust
+            diag/target/msp430-none-elf/release/diag
+            prod/target/msp430-none-elf/release/prod-fr247x
+            prod/target/msp430-none-elf/release/prod-fr24xx
           if-no-files-found: error

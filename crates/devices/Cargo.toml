@@ -1,0 +1,11 @@
+[package]
+name = "devices"
+version = "0.1.0"
+edition = "2021"
+description = "Shared per-device drivers for the bob-929 Stem — one module per sensor behind a standard convention, providing BOTH diag and prod functions. Generic over embedded-hal I2c → PAC/family-agnostic, consumed by diag + prod across FR2433/FR2476 (and future chipsets)."
+
+# PAC-agnostic like `sched`: drivers talk only to the `embedded-hal` I2c trait, never a PAC — so the
+# same code compiles for any MSP430 part (or a host unit test). The per-family bus impl lives in the
+# firmware crate (diag/src/hal.rs style), not here. See the per-sensor-module convention.
+[dependencies]
+embedded-hal = "1.0"
