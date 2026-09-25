@@ -30,8 +30,10 @@ Sources of truth: `crates/bsp/connections.toml` (pin registry) and
 `ziloo/Hardware/stem/STEM-EXPANDER.md` ("MSP430 supervisor bus scope"). The PNG/SVG here carry a
 `SUPERSEDED` banner pointing back to these.
 
-## Open task
+## Status: retired
 
-The **original KiCad project** that produced this symbol is **not in any repo** (only the exports are
-here). Locating it is tracked in `../NOTES.md` — if found, it should be corrected to match
-`connections.toml`, or formally retired.
+The **original KiCad project** that produced this symbol is not in any repo or in the iCloud `Talki/`
+tree (only these exports remain). Recovering it was **retired as a concern on 2026-09-24** — it doesn't
+matter; **new hardware designs will be created** and will supersede this. Until then, the canonical pin
+map is `crates/bsp/connections.toml` and the bus roles live in `ziloo/Hardware/stem/STEM-EXPANDER.md`;
+this bannered render stays only as historical POC context.
