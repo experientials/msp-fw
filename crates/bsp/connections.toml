@@ -23,6 +23,28 @@ package   = "RHA VQFN-40?"          # PROVISIONAL — confirm against the unit o
 datasheet = "datasheets/msp430fr2476.pdf"
 
 # ---------------------------------------------------------------------------
+# BUSES — the MCU's I2C buses and their master/slave roles (doc-generation source).
+# The MSP is on EXACTLY these two I2C buses and NOTHING else (never SYS_I2C / the PMIC bus;
+# those are SoM-side). `scripts/gen-bsp-docs.py` renders these + per-bus pin membership
+# (matched by `module`) into crates/bsp/generated/. Keep role facts HERE, not in prose docs.
+#   role : master | slave | master-switch
+# ---------------------------------------------------------------------------
+
+[[bus]]
+id     = "sensor"
+name   = "Sensor I2C"
+module = "eUSCI_B0"
+role   = "master-switch"
+desc   = "MSP MASTERS it in Sensing mode; RELEASES it so the SoM masters it in Passive mode."
+
+[[bus]]
+id     = "stem"
+name   = "Stem I2C"
+module = "eUSCI_B1"
+role   = "slave"
+desc   = "MSP is ALWAYS the slave; the SoM (RT core) or the RP2040 always masters it."
+
+# ---------------------------------------------------------------------------
 # ACTIVE — implemented in the diag firmware today (LEDs + backchannel)
 # ---------------------------------------------------------------------------
 

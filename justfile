@@ -28,6 +28,7 @@ mod pac
 mod diag
 mod prod
 mod usb
+mod bsp
 
 default:
     @just --list
