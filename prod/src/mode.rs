@@ -13,6 +13,7 @@
 #![allow(dead_code)] // some paths are unused depending on which mode features are compiled in.
 
 use crate::pac::Peripherals;
+use crate::regmap;
 
 const SENSOR_PINS: u8 = 0x0C; // P1.2 (UCB0SDA) | P1.3 (UCB0SCL) — the sensor-master bus
 const UCSWRST: u16 = 0x0001;
@@ -72,6 +73,30 @@ impl Mode {
             Mode::Passive => "passive",
             #[cfg(feature = "mode-sensing")]
             Mode::Sensing => "sensing",
+        }
+    }
+
+    /// Stable wire ABI code for the SoM-facing mode register (`regmap::MODE_CTRL`, 0x3E). Independent
+    /// of which variants were compiled in, so the SoM reads consistent numbers across build variants.
+    pub fn code(self) -> u8 {
+        match self {
+            #[cfg(feature = "mode-passive")]
+            Mode::Passive => regmap::MODE_CODE_PASSIVE,
+            #[cfg(feature = "mode-sensing")]
+            Mode::Sensing => regmap::MODE_CODE_SENSING,
+        }
+    }
+
+    /// Decode a wire ABI code to a mode — but ONLY if that mode was compiled into this image. Returns
+    /// `None` for an unknown code or a mode this image doesn't support, so a SoM request for an absent
+    /// mode is safely ignored rather than mis-switched.
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            #[cfg(feature = "mode-passive")]
+            regmap::MODE_CODE_PASSIVE => Some(Mode::Passive),
+            #[cfg(feature = "mode-sensing")]
+            regmap::MODE_CODE_SENSING => Some(Mode::Sensing),
+            _ => None,
         }
     }
 }

@@ -193,6 +193,21 @@ pub fn write(p: &Peripherals, addr: u8, data: &[u8]) -> bool {
 /// proven `i2c::read_reg` (same FR2476 eUSCI_B) — the register-read primitive the shared device
 /// drivers use via `hal::EusciI2c`'s `write_read`.
 pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
+    read_reg_pumped(p, addr, reg, buf, || {})
+}
+
+/// Like [`read_reg`], but calls `pump` at the top of every spin-wait. Used by the B0↔B1 loopback
+/// self-test (`stem::loopback_selftest`) to service the eUSCI_B1 SLAVE (`stem::poll`) while this
+/// master reads it on the SAME MCU — without the pump the slave's clock-stretch deadlocks the blocking
+/// master. Normal callers use [`read_reg`] (`pump = || {}`, which the optimiser drops). Behaviourally
+/// identical to the ported diag `i2c::read_reg` apart from the injected pump.
+pub fn read_reg_pumped(
+    p: &Peripherals,
+    addr: u8,
+    reg: u8,
+    buf: &mut [u8],
+    mut pump: impl FnMut(),
+) -> bool {
     if buf.is_empty() {
         return false;
     }
@@ -209,6 +224,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
         .modify(|r, w| unsafe { w.bits(r.bits() | UCTR | UCTXSTT) });
     let mut n = 0u16;
     while ifg(p) & (UCTXIFG0 | UCNACKIFG) == 0 {
+        pump();
         n += 1;
         if n >= SPIN {
             stop(p);
@@ -225,6 +241,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
     p.e_usci_b0.ucb0txbuf().write(|w| unsafe { w.bits(reg as u16) });
     n = 0;
     while ifg(p) & UCTXIFG0 == 0 {
+        pump();
         n += 1;
         if n >= SPIN {
             stop(p);
@@ -241,6 +258,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
             // last byte: wait for the repeated-START/address to go out, then arm NACK+STOP.
             n = 0;
             while ctlw0(p) & UCTXSTT != 0 {
+                pump();
                 n += 1;
                 if n >= SPIN {
                     stop(p);
@@ -253,6 +271,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
         }
         n = 0;
         while ifg(p) & UCRXIFG0 == 0 {
+            pump();
             n += 1;
             if n >= SPIN {
                 stop(p);
@@ -263,6 +282,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
     }
     n = 0;
     while ctlw0(p) & UCTXSTP != 0 {
+        pump();
         n += 1;
         if n >= SPIN {
             break;

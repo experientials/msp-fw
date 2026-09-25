@@ -174,11 +174,13 @@ fn run_dual(p: &Peripherals) -> ! {
 
     // The Stem-bus I2C-slave surface (eUSCI_B1): the SoM reads this register file. `rf` holds the
     // live status snapshot (+ PCA9698 shadow); `slave` is the per-transaction state. Polled below.
-    let mut rf = stem::RegFile::new(if mach.is_sensing() {
+    let mut st = if mach.is_sensing() {
         status::Status::from_scan(model, &last)
     } else {
         status::Status::booted(model) // Passive: not enumerated (didn't master the bus)
-    });
+    };
+    st.set_mode(mach.current().code()); // publish the boot mode at MODE_CTRL (0x3E)
+    let mut rf = stem::RegFile::new(st);
     let mut slave = stem::Slave::new();
     stem::init(p);
 
@@ -198,11 +200,47 @@ fn run_dual(p: &Peripherals) -> ! {
         if !model.matches_build_family() {
             uart::puts(p, "!! WRONG-FAMILY FLASH: detected part is not in this image's family\n");
         }
-        uart::puts(p, "commands: s=scan  r=report  d=debug regs  m=switch mode\n");
+        uart::puts(p, "commands: s=scan  r=report  d=debug regs  m=switch mode  l=loopback self-test\n");
         enumerate::report(p, &last);
         rf.status.dump(p);
+        // Boot self-test: drive the eUSCI_B1 SLAVE from the eUSCI_B0 MASTER (needs the P3.2->P1.2 /
+        // P3.6->P1.3 jumpers). Auto-run so hwd's READ-ONLY console captures PASS/FAIL with NO keystroke
+        // — a short-lived agent reads the hwd console log but cannot send the `l` keystroke. No jumpers
+        // → an honest "no response". Only meaningful in Sensing (B0 must be up as master).
+        if mach.is_sensing() {
+            let lb = stem::loopback_selftest(p, &mut slave, &mut rf);
+            uart::puts(p, "loopback B0->B1 @0x");
+            uart::hex8(p, stem::STEM_ADDR as u8);
+            uart::puts(p, " (boot self-test): ");
+            if !lb.ran {
+                uart::puts(p, "no response (fit jumpers P3.2->P1.2, P3.6->P1.3)\n");
+            } else {
+                uart::puts(p, "iface=0x");
+                uart::hex8(p, lb.iface);
+                uart::puts(p, " verMaj=");
+                uart::dec(p, lb.ver_major as u16);
+                uart::puts(p, if lb.passed() { "  PASS\n" } else { "  FAIL\n" });
+            }
+        }
         loop {
             stem::poll(p, &mut slave, &mut rf); // service the SoM/Stem master
+            // A SoM write to MODE_CTRL (0x3E) queues a mode switch; apply it here, out of the poll.
+            if let Some(code) = rf.take_mode_request() {
+                match mode::Mode::from_code(code) {
+                    Some(m) if m != mach.current() => {
+                        apply_mode(p, &mut mach, &mut rf, model, &mut last, m);
+                        uart::puts(p, "mode (SoM) -> ");
+                        uart::puts(p, mach.current().name());
+                        uart::putc(p, b'\n');
+                    }
+                    Some(_) => {} // already in that mode — nothing to do
+                    None => {
+                        uart::puts(p, "mode (SoM): ignoring unsupported code 0x");
+                        uart::hex8(p, code);
+                        uart::putc(p, b'\n');
+                    }
+                }
+            }
             if uart::rx_ready(p) {
                 match uart::getc(p) {
                     b's' | b'S' => {
@@ -210,6 +248,7 @@ fn run_dual(p: &Peripherals) -> ! {
                             last = enumerate::scan(p);
                             enumerate::report(p, &last);
                             rf.status = status::Status::from_scan(model, &last);
+                            rf.status.set_mode(mach.current().code());
                         } else {
                             uart::puts(p, "  (passive: not mastering the sensor bus)\n");
                         }
@@ -218,22 +257,37 @@ fn run_dual(p: &Peripherals) -> ! {
                     b'd' | b'D' => rf.status.dump(p),
                     b'm' | b'M' => {
                         let next = mach.current().toggled();
-                        mach.switch(p, next); // acquire/release the sensor bus for the new mode
+                        apply_mode(p, &mut mach, &mut rf, model, &mut last, next);
                         uart::puts(p, "mode -> ");
                         uart::puts(p, mach.current().name());
                         uart::putc(p, b'\n');
                         if mach.is_sensing() {
-                            last = enumerate::scan(p);
                             enumerate::report(p, &last);
-                            rf.status = status::Status::from_scan(model, &last);
                         } else {
-                            last = enumerate::Scan::absent();
                             uart::puts(p, "  sensor bus released (SoM owns it)\n");
-                            rf.status = status::Status::booted(model);
+                        }
+                    }
+                    b'l' | b'L' => {
+                        if mach.is_sensing() {
+                            let lb = stem::loopback_selftest(p, &mut slave, &mut rf);
+                            uart::puts(p, "loopback B0->B1 @0x");
+                            uart::hex8(p, stem::STEM_ADDR as u8);
+                            uart::puts(p, ": ");
+                            if !lb.ran {
+                                uart::puts(p, "no response (jumper P3.2->P1.2, P3.6->P1.3?)\n");
+                            } else {
+                                uart::puts(p, "iface=0x");
+                                uart::hex8(p, lb.iface);
+                                uart::puts(p, " verMaj=");
+                                uart::dec(p, lb.ver_major as u16);
+                                uart::puts(p, if lb.passed() { "  PASS\n" } else { "  FAIL\n" });
+                            }
+                        } else {
+                            uart::puts(p, "  (loopback needs Sensing: B0 must master the bus)\n");
                         }
                     }
                     b'\r' | b'\n' => {}
-                    _ => uart::puts(p, "  (s=scan r=report d=debug m=mode)\n"),
+                    _ => uart::puts(p, "  (s=scan r=report d=debug m=mode l=loopback)\n"),
                 }
             }
         }
@@ -243,13 +297,43 @@ fn run_dual(p: &Peripherals) -> ! {
     // surface. Poll it forever — this is the node's whole job until wake/INT logic lands.
     #[cfg(not(feature = "console"))]
     {
-        // Production: the boot-default mode is active (its entry action already ran in `boot`);
-        // runtime mode switches arrive over the register interface (TODO: SoM-facing mode register).
-        let _ = (&last, &mach);
+        // Production: the boot-default mode is active (its entry action already ran in `boot`). Runtime
+        // switches arrive as a SoM write to MODE_CTRL (0x3E), applied here out of the slave poll.
         loop {
             stem::poll(p, &mut slave, &mut rf);
+            if let Some(code) = rf.take_mode_request() {
+                if let Some(m) = mode::Mode::from_code(code) {
+                    if m != mach.current() {
+                        apply_mode(p, &mut mach, &mut rf, model, &mut last, m);
+                    }
+                }
+            }
         }
     }
+}
+
+/// Apply a mode switch — from the bench `m` key OR a SoM write to `MODE_CTRL` (0x3E). Centralises what
+/// both triggers must do so they can't drift: hand off the sensor bus (`ModeMachine::switch`), refresh
+/// the scan + the status snapshot the SoM reads, and republish the live mode code at 0x3E.
+#[cfg(feature = "_dual")]
+fn apply_mode(
+    p: &Peripherals,
+    mach: &mut mode::ModeMachine,
+    rf: &mut stem::RegFile,
+    model: model::Model,
+    last: &mut enumerate::Scan,
+    new: mode::Mode,
+) {
+    mach.switch(p, new); // sequenced bus acquire/release (no-op if already there)
+    let mut st = if mach.is_sensing() {
+        *last = enumerate::scan(p);
+        status::Status::from_scan(model, last)
+    } else {
+        *last = enumerate::Scan::absent();
+        status::Status::booted(model)
+    };
+    st.set_mode(mach.current().code());
+    rf.status = st;
 }
 
 /// Boot splash on a connected OLED: firmware version + boot success for ~5 s, then blank the panel

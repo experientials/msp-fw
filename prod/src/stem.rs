@@ -63,6 +63,11 @@ pub struct RegFile {
     shadow: ShadowState,
     op: [u8; regmap::BANKS as usize],  // Output Port (0x08–0x0F)
     ioc: [u8; regmap::BANKS as usize], // I/O Config / direction (0x18–0x1F)
+    /// Pending SoM-requested operating-mode switch (a `MODE_CTRL`/0x3E write). Applied by the main
+    /// loop AFTER the transaction — the switch does sensor-bus acquire/release, which must not run
+    /// inside `poll` (it'd re-enter the bus mid-transfer). The CURRENT mode is read back via
+    /// `status.mode` (kept live by `Status::set_mode`), so reads need no special-casing here.
+    mode_request: Option<u8>,
 }
 
 impl RegFile {
@@ -72,7 +77,14 @@ impl RegFile {
             shadow: ShadowState::default(),
             op: [0; regmap::BANKS as usize],
             ioc: [0; regmap::BANKS as usize],
+            mode_request: None,
         }
+    }
+
+    /// Take any pending SoM-requested mode code, clearing it. The main loop decodes it via
+    /// `mode::Mode::from_code` and applies the switch through the mode machine.
+    pub fn take_mode_request(&mut self) -> Option<u8> {
+        self.mode_request.take()
     }
 
     /// Read the byte a master gets for command index `reg`.
@@ -94,6 +106,12 @@ impl RegFile {
 
     /// Apply a master write of `val` to command index `reg`. Read-only regions are ignored.
     fn write(&mut self, reg: u8, val: u8) {
+        // Operating-mode control (0x3E): record the request; the main loop applies it after the
+        // transaction (decode(0x3E) is Extended, which is otherwise read-only → this must precede it).
+        if reg == regmap::MODE_CTRL {
+            self.mode_request = Some(val);
+            return;
+        }
         match regmap::decode(reg) {
             regmap::RegSel::OutputPort(b) => self.op[b as usize] = val,
             regmap::RegSel::IoConfig(b) => self.ioc[b as usize] = val,
@@ -168,4 +186,49 @@ pub fn poll(p: &Peripherals, s: &mut Slave, rf: &mut RegFile) {
 
 fn clear(p: &Peripherals, bit: u16) {
     p.e_usci_b1.ucb1ifg().modify(|r, w| unsafe { w.bits(r.bits() & !bit) });
+}
+
+/// Result of the B0↔B1 loopback self-test ([`loopback_selftest`]).
+#[cfg(feature = "console")]
+pub struct Loopback {
+    /// Both master reads completed (bus not wedged — i.e. the jumpers are in and the slave answered).
+    pub ran: bool,
+    /// Byte read back from `DBG_IFACE` (0x30) — expect [`regmap::DBG_IFACE_MAGIC`].
+    pub iface: u8,
+    /// Byte read back from `DBG_FW_VER_MAJOR` (0x3B) — expect [`crate::FW_VER_MAJOR`].
+    pub ver_major: u8,
+}
+
+#[cfg(feature = "console")]
+impl Loopback {
+    /// PASS = both reads landed and returned the expected identity magic + version-major.
+    pub fn passed(&self) -> bool {
+        self.ran && self.iface == regmap::DBG_IFACE_MAGIC && self.ver_major == crate::FW_VER_MAJOR
+    }
+}
+
+/// Bench self-test with NO SoM: jumper **P3.2→P1.2** and **P3.6→P1.3** so the eUSCI_B0 MASTER shares a
+/// bus with this eUSCI_B1 SLAVE, then have the master READ our own slave surface. This proves the slave
+/// answers a real master (not merely that it builds and boots).
+///
+/// It's a single MCU, so a plain blocking master read would DEADLOCK — the slave clock-stretches SCL
+/// waiting for firmware to service its RX/TX while that same firmware is blocked in the master read. We
+/// break the deadlock by pumping [`poll`] inside every master spin-wait (`i2c::read_reg_pumped`), so
+/// the slave side is serviced between the master's byte phases.
+///
+/// Requires **Sensing** (B0 must be up as master). With no jumpers the master reads just time out →
+/// `ran == false` (harmless). Console/bench only.
+#[cfg(feature = "console")]
+pub fn loopback_selftest(p: &Peripherals, s: &mut Slave, rf: &mut RegFile) -> Loopback {
+    let addr = STEM_ADDR as u8;
+    let mut iface = [0u8; 1];
+    let r1 = crate::i2c::read_reg_pumped(p, addr, regmap::DBG_IFACE, &mut iface, || poll(p, s, rf));
+    let mut ver = [0u8; 1];
+    let r2 =
+        crate::i2c::read_reg_pumped(p, addr, regmap::DBG_FW_VER_MAJOR, &mut ver, || poll(p, s, rf));
+    Loopback {
+        ran: r1 && r2,
+        iface: iface[0],
+        ver_major: ver[0],
+    }
 }
