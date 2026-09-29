@@ -1,7 +1,7 @@
 //! eUSCI_B0 I2C master, 100 kHz. Polled/blocking with bounded waits so a stuck bus
 //! (SDA/SCL held low) reports failure instead of hanging the firmware. Pins routed in main.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const UCSWRST: u16 = 0x0001;
 const UCMODE_3: u16 = 0x0600;

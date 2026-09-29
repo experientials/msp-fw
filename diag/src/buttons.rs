@@ -8,7 +8,7 @@
 //!
 //! Reading is a bare pin sample; debounce + edge detection live in `tasks::ButtonTask`.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const S1_BIT: u8 = 0x01; // P4.0
 

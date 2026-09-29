@@ -12,7 +12,7 @@
 #![allow(dead_code)]
 
 use embedded_hal::i2c::{self, ErrorType, I2c, Operation, SevenBitAddress};
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 /// Owns "the I2C bus" for a driver. Just a `&Peripherals`, so it's `Copy` and free to hand out.
 #[derive(Clone, Copy)]

@@ -15,7 +15,7 @@
 //! password-protected (unlike PMMCTL0). Channels/reference/resolution verified against the FR2476
 //! datasheet (Table 9-19 channels, Table 9-30 TLV cal) and the vendored PAC.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 // TLV factory cal: ADC readings of the temperature sensor at the internal 1.5-V reference
 // (datasheet Table 9-30, ADC calibration block tag 0x11 @ 0x1A14). Read-only info memory.

@@ -12,7 +12,7 @@
 //! `main` configures the pin as GPIO input with a pulldown, so an unplugged sensor reads idle
 //! (LOW) rather than floating.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 /// P2.4 — RCWL-0516 OUT. Kept here (not in `main`) so the pin mask lives next to its reader.
 pub const RCWL_OUT: u8 = 0x10; // BIT4

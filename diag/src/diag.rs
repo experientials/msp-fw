@@ -7,7 +7,7 @@ use crate::{i2c, is31, uart};
 use devices::mc6470::{Mc6470, ADDR as MC6470_ADDR};
 use devices::si7021::{Si7021, ADDR as SI7021_ADDR, PART_SI7021};
 use devices::{Device, Error};
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 // 8x8 status glyphs (orientation may be mirrored/rotated on real hardware; fix once seen).
 const GLYPH_CHECK: [u8; 8] = [0x01, 0x03, 0x06, 0x8C, 0xD8, 0x70, 0x20, 0x00];

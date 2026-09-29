@@ -12,7 +12,7 @@
 use crate::hal::EusciI2c;
 use crate::{buttons, diag, rcwl, ssd1306_raw as ssd, uart};
 use devices::{apds9960::Apds9960, Device};
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 use sched::Task;
 
 /// What the firmware is currently doing. **One button (S1) cycles through these in order** —
@@ -344,7 +344,7 @@ impl UiTask {
     }
 
     /// Draw the bottom-line `N of M` progress.
-    fn progress(p: &msp430fr2476::Peripherals, cur: u8, tot: u8) {
+    fn progress(p: &crate::pac::Peripherals, cur: u8, tot: u8) {
         let c = ssd::num(p, 3, 0, cur as u32);
         let c = ssd::text(p, 3, c, " of ");
         let c = ssd::num(p, 3, c, tot as u32);
@@ -352,7 +352,7 @@ impl UiTask {
     }
 
     /// Draw the error shorthand line (`NACK n CRPT n`).
-    fn errors(p: &msp430fr2476::Peripherals, line: u8, nack: u32, corrupt: u32) {
+    fn errors(p: &crate::pac::Peripherals, line: u8, nack: u32, corrupt: u32) {
         let c = ssd::text(p, line, 0, "NACK ");
         let c = ssd::num(p, line, c, nack);
         let c = ssd::text(p, line, c, " CRPT ");

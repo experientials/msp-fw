@@ -4,7 +4,7 @@
 //! the chip. Every value is the live SFR read back after init, not a constant.
 
 use crate::uart;
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 /// Decode SYSRSTIV (reset-cause vector) to text — values verified against the FR2476 datasheet
 /// (Table 9-x, SYSRSTIV). This is the MCU-self reset-cause check: it turns a mystery reboot into

@@ -1,30 +1,15 @@
-//! eUSCI_A0 backchannel UART, 9600 8N1. Pins routed in main.
+//! Backchannel UART, 9600 8N1 — chip-agnostic text layer. The eUSCI instance (A0 on FR2476,
+//! A1 on FR2355), its baud config, and the TX pins are all in the `board` module; this file only
+//! formats bytes and hands each to `board::uart_tx`. Pins are routed in main via `board`.
 
-use msp430fr2476::Peripherals;
-
-const UCSWRST: u16 = 0x0001;
-const UCSSEL_SMCLK: u16 = 0x0080;
-const UCOS16: u16 = 0x0001;
-const UCTXIFG: u16 = 0x0002;
+use crate::pac::Peripherals;
 
 pub fn init(p: &Peripherals) {
-    p.e_usci_a0.uca0ctlw0().write(|w| unsafe { w.bits(UCSWRST) });
-    p.e_usci_a0
-        .uca0ctlw0()
-        .modify(|r, w| unsafe { w.bits(r.bits() | UCSSEL_SMCLK) });
-    p.e_usci_a0.uca0brw().write(|w| unsafe { w.bits(6) });
-    // UCBRSx=0x20, UCBRFx=8, UCOS16=1 (TI baud table, 1 MHz / 9600).
-    p.e_usci_a0
-        .uca0mctlw()
-        .write(|w| unsafe { w.bits(0x2000 | (8 << 4) | UCOS16) });
-    p.e_usci_a0
-        .uca0ctlw0()
-        .modify(|r, w| unsafe { w.bits(r.bits() & !UCSWRST) });
+    crate::board::uart_init(p);
 }
 
 pub fn putc(p: &Peripherals, c: u8) {
-    while p.e_usci_a0.uca0ifg().read().bits() & UCTXIFG == 0 {}
-    p.e_usci_a0.uca0txbuf().write(|w| unsafe { w.bits(c as u16) });
+    crate::board::uart_tx(p, c);
 }
 
 pub fn puts(p: &Peripherals, s: &str) {

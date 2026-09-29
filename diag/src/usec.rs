@@ -5,23 +5,18 @@
 //!
 //! Only compiled into the `stress` build.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
-const TASSEL_SMCLK: u16 = 0x0200; // TASSEL_2
-const MC_CONTINUOUS: u16 = 0x0020; // MC_2
-const TACLR: u16 = 0x0004;
-
-/// Start TA0 counting continuously at 1 µs/tick. SMCLK must be 1 MHz (main's clock_init).
+/// Start the µs timer counting continuously at 1 µs/tick. SMCLK must be 1 MHz (board clock_init).
+/// The timer instance is board-specific (TA0 on FR2476; TB1 on FR2355, which has no Timer_A).
 pub fn start(p: &Peripherals) {
-    p.ta0
-        .ta0ctl()
-        .write(|w| unsafe { w.bits(TASSEL_SMCLK | MC_CONTINUOUS | TACLR) });
+    crate::board::usec_start(p);
 }
 
 /// Current µs counter (wraps at 65536). Diff two samples with `wrapping_sub` for an elapsed µs.
 #[inline]
 pub fn now(p: &Peripherals) -> u16 {
-    p.ta0.ta0r().read().bits()
+    crate::board::usec_now(p)
 }
 
 /// Busy-wait `us` microseconds (≤ 65535, i.e. under one TA0 wrap). Polls tightly so it never

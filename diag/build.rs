@@ -40,15 +40,62 @@ fn main() {
     };
     println!("cargo:rustc-env=DIAG_VERSION={version}");
     println!("cargo:rustc-env=DIAG_BUILD={stamp}");
+
+    emit_memory_x();
+}
+
+/// Emit the linker memory map for the selected chip into OUT_DIR (found via link.x's
+/// `INCLUDE memory.x` + the link-search below). The ONLY delta between the two targets is RAM size
+/// (FR2476 = 8 KB, FR2355 = 4 KB); ROM window and the minimal no-ISR vector region are shared.
+/// Generating it here (not a static file) is what makes both chips first-class build targets from
+/// one tree — no file swapping.
+fn emit_memory_x() {
+    use std::io::Write;
+    let ram_len = if std::env::var("CARGO_FEATURE_FR2355").is_ok() {
+        "0x1000" // FR2355: 4 KB SRAM (0x2000-0x2FFF)
+    } else {
+        "0x2000" // FR2476: 8 KB SRAM (0x2000-0x3FFF)
+    };
+    let memx = format!(
+        "MEMORY\n\
+         {{\n\
+        \x20 RAM     : ORIGIN = 0x2000, LENGTH = {ram_len}\n\
+        \x20 ROM     : ORIGIN = 0x8000, LENGTH = 0x7F80\n\
+        \x20 /* diag uses no interrupts: only the reset vector (0xFFFE) matters, so the vector\n\
+        \x20    region is the minimal 0xFFE0-0xFFFF. Revisit with the PAC `rt` feature if ISRs land. */\n\
+        \x20 VECTORS : ORIGIN = 0xFFE0, LENGTH = 0x0020\n\
+         }}\n"
+    );
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    let path = std::path::Path::new(&out).join("memory.x");
+    std::fs::File::create(&path)
+        .expect("create memory.x")
+        .write_all(memx.as_bytes())
+        .expect("write memory.x");
+    println!("cargo:rustc-link-search={out}");
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FR2355");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FR2476");
 }
 
 /// Build target (chip/config variant), e.g. `fr2433`, `fr2476`. `None` until we build per-chip —
 /// see the board-crate plan (chip = cargo feature, role = FRAM config).
 fn target() -> Option<String> {
-    std::env::var("DIAG_TARGET")
-        .ok()
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
+    // Explicit override wins; otherwise derive from the active chip feature so the stamp always
+    // carries which target it was built for (fr2355/… vs fr2476/…) with no manual env.
+    if let Ok(t) = std::env::var("DIAG_TARGET") {
+        let t = t.trim().to_string();
+        if !t.is_empty() {
+            return Some(t);
+        }
+    }
+    if std::env::var("CARGO_FEATURE_FR2355").is_ok() {
+        return Some("fr2355".into());
+    }
+    if std::env::var("CARGO_FEATURE_FR2476").is_ok() {
+        return Some("fr2476".into());
+    }
+    None
 }
 
 /// `<year>.<release>` — CalVer. Year from the build clock; release from `DIAG_RELEASE` (a release

@@ -13,9 +13,21 @@
 extern crate panic_msp430; // infinitely-looping panic handler
 
 use msp430_rt::entry;
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
+
+// Chip select: re-export the one selected PAC as `crate::pac` so every module is chip-agnostic
+// (`use crate::pac::Peripherals`). Exactly one of the mutually-exclusive features must be on.
+#[cfg(feature = "fr2476")]
+pub use msp430fr2476 as pac;
+#[cfg(feature = "fr2355")]
+pub use msp430fr2355 as pac;
+#[cfg(all(feature = "fr2476", feature = "fr2355"))]
+compile_error!("features fr2476 and fr2355 are mutually exclusive — select exactly one chip");
+#[cfg(not(any(feature = "fr2476", feature = "fr2355")))]
+compile_error!("select a chip target: --features fr2476 (default) or --no-default-features --features fr2355");
 
 mod adc;
+mod board; // per-target chip/board specifics: clock, UART instance+pins, µs timer
 mod buttons;
 mod clock;
 mod diag;
@@ -41,18 +53,10 @@ const WDTCNTCL: u16 = 0x0008; // clear the counter ("pet")
 // hang (or a panic-msp430 infinite loop) does, and the board resets and retries instead of dying.
 const WDT_BACKSTOP: u16 = WDTPW | WDTSSEL_ACLK | WDTIS_DIV_2E19;
 const LOCKLPM5: u16 = 0x0001;
-const SELREF_REFOCLK: u16 = 0x0010;
-const DCOFTRIMEN: u16 = 0x0080;
-const DCOFTRIM0: u16 = 0x0010;
-const DCOFTRIM1: u16 = 0x0020;
-const DCORSEL_0: u16 = 0x0000;
-const FLLD_0: u16 = 0x0000;
-const SELMS_DCOCLKDIV: u16 = 0x0000;
-const SELA_REFOCLK: u16 = 0x0100;
-const FLLUNLOCK: u16 = 0x0300; // FLLUNLOCK0 | FLLUNLOCK1 (CSCTL7)
 
-// P1SEL0 bits routing the eUSCI functions: P1.2/P1.3 -> UCB0 I2C, P1.4/P1.5 -> UCA0 UART.
-const P1_EUSCI_PINS: u8 = 0x3C; // BIT2|BIT3|BIT4|BIT5
+// I2C (UCB0) pin routing is identical on both targets: P1.2/P1.3. The chip/board-specific clock
+// setup and UART pins (FR2476: P1.4/1.5 UCA0; FR2355: P4.2/4.3 UCA1) live in the `board` module.
+const P1_I2C_PINS: u8 = 0x0C; // BIT2|BIT3 -> UCB0 SDA/SCL
 const P2_SDB: u8 = 0x20; // P2.5 -> IS31FL3730 SDB (drive high to enable). NOT P2.0 — crystal XOUT.
 const P2_RCWL_OUT: u8 = 0x10; // P2.4 <- RCWL-0516 radar OUT (GPIO input, port-interrupt capable).
 
@@ -68,27 +72,6 @@ const BANNER: &str = "\n\
 ###    ###   #  #    ###\n\
 ========================================\n";
 
-/// MCLK = SMCLK = DCODIV = 1 MHz (FLL ref = REFO), ACLK = REFO. Disables the FLL (SCG0)
-/// while retuning and waits for re-lock before switching the clocks — required for a clean
-/// 9600 baud UART; the loose "close enough" version garbles the first bytes.
-fn clock_init_1mhz(p: &Peripherals) {
-    unsafe { core::arch::asm!("bis #0x40, r2", options(nomem, nostack)) }; // SCG0=1: FLL off
-    p.cs.csctl3().modify(|r, w| unsafe { w.bits(r.bits() | SELREF_REFOCLK) });
-    p.cs
-        .csctl1()
-        .write(|w| unsafe { w.bits(DCOFTRIMEN | DCOFTRIM0 | DCOFTRIM1 | DCORSEL_0) });
-    p.cs.csctl2().write(|w| unsafe { w.bits(FLLD_0 + 30) }); // FLLN=30 -> 1 MHz
-    msp430::asm::nop();
-    msp430::asm::nop();
-    msp430::asm::nop();
-    unsafe { core::arch::asm!("bic #0x40, r2", options(nomem, nostack)) }; // SCG0=0: FLL on
-    while p.cs.csctl7().read().bits() & FLLUNLOCK != 0 {} // wait for FLL lock
-    p.cs.csctl4().write(|w| unsafe { w.bits(SELMS_DCOCLKDIV | SELA_REFOCLK) });
-    for _ in 0..8000u16 {
-        msp430::asm::nop(); // let the DCO settle before clocking the UART
-    }
-}
-
 /// Pet the watchdog backstop (reload its counter). Called every scheduler pass, and inside the
 /// stress runner's long loops so a multi-second soak doesn't trip the ~16 s reset.
 fn pet_wdt(p: &Peripherals) {
@@ -103,14 +86,15 @@ fn main() -> ! {
     let p = unsafe { Peripherals::steal() };
 
     p.wdt_a.wdtctl().write(|w| unsafe { w.bits(WDTPW | WDTHOLD) }); // stop watchdog
-    clock_init_1mhz(&p);
+    board::clock_init_1mhz(&p);
 
-    // Route P1.2..P1.5 to eUSCI. The pin function is the 2-bit pair (P1SEL1:P1SEL0);
-    // 01 = primary module (UCB0 I2C on P1.2/1.3, UCA0 UART on P1.4/1.5). Reset leaves
-    // P1SEL1=0, but clear the bits explicitly so we don't silently depend on that and
-    // accidentally select the secondary/tertiary function.
-    p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_EUSCI_PINS) }); // SEL1=0
-    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_EUSCI_PINS) }); // SEL0=1
+    // I2C (UCB0) on P1.2/P1.3 — identical on both targets. The pin function is the 2-bit pair
+    // (P1SEL1:P1SEL0); 01 = primary module. Reset leaves P1SEL1=0, but clear it explicitly so we
+    // never silently depend on that and select the secondary/tertiary function.
+    p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_I2C_PINS) }); // SEL1=0
+    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_I2C_PINS) }); // SEL0=1
+    // UART backchannel pins — chip/board-specific (FR2476: P1.4/1.5 UCA0; FR2355: P4.2/4.3 UCA1).
+    board::route_uart_pins(&p);
     p.pmm.pm5ctl0().modify(|r, w| unsafe { w.bits(r.bits() & !LOCKLPM5) });
 
     // Enable the IS31FL3730 (SDB high on P2.5). Set output high before direction.
