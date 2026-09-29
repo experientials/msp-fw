@@ -35,20 +35,20 @@ pub fn clock_init_1mhz(p: &Peripherals) {
     }
 }
 
-// UART pins: P1.4/P1.5 -> UCA0 (SEL1:SEL0 = 01). I2C pins (P1.2/3) are routed shared in main.
+// Console-UART pins: P1.4/P1.5 -> UCA0 (SEL1:SEL0 = 01). Leaf-I2C pins are routed in board::mod.
 const P1_UART_PINS: u8 = 0x30; // BIT4|BIT5
-pub fn route_uart_pins(p: &Peripherals) {
+pub fn route_console_uart_pins(p: &Peripherals) {
     p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_UART_PINS) }); // SEL1=0
     p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_UART_PINS) }); // SEL0=1
 }
 
-// eUSCI_A0 UART, 9600 8N1 @ 1 MHz SMCLK.
+// Console UART = eUSCI_A0, 9600 8N1 @ 1 MHz SMCLK (the FR2476 LaunchPad backchannel).
 const UCSWRST: u16 = 0x0001;
 const UCSSEL_SMCLK: u16 = 0x0080;
 const UCOS16: u16 = 0x0001;
 const UCTXIFG: u16 = 0x0002;
 
-pub fn uart_init(p: &Peripherals) {
+pub fn console_uart_init(p: &Peripherals) {
     p.e_usci_a0.uca0ctlw0().write(|w| unsafe { w.bits(UCSWRST) });
     p.e_usci_a0
         .uca0ctlw0()
@@ -64,9 +64,19 @@ pub fn uart_init(p: &Peripherals) {
 }
 
 #[inline]
-pub fn uart_tx(p: &Peripherals, c: u8) {
+pub fn console_uart_tx(p: &Peripherals, c: u8) {
     while p.e_usci_a0.uca0ifg().read().bits() & UCTXIFG == 0 {}
     p.e_usci_a0.uca0txbuf().write(|w| unsafe { w.bits(c as u16) });
+}
+
+/// Snapshot the console UART's config regs (CTLW0, BRW, MCTLW) for the SFR dump — reads the
+/// backchannel instance (UCA0 here) so the dump is correct per module, not hardcoded.
+pub fn console_uart_regs(p: &Peripherals) -> (u16, u16, u16) {
+    (
+        p.e_usci_a0.uca0ctlw0().read().bits(),
+        p.e_usci_a0.uca0brw().read().bits(),
+        p.e_usci_a0.uca0mctlw().read().bits(),
+    )
 }
 
 // µs time base: TA0 free-running off SMCLK (1 MHz -> 1 µs/tick, wraps every 65.536 ms).

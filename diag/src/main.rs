@@ -54,9 +54,7 @@ const WDTCNTCL: u16 = 0x0008; // clear the counter ("pet")
 const WDT_BACKSTOP: u16 = WDTPW | WDTSSEL_ACLK | WDTIS_DIV_2E19;
 const LOCKLPM5: u16 = 0x0001;
 
-// I2C (UCB0) pin routing is identical on both targets: P1.2/P1.3. The chip/board-specific clock
-// setup and UART pins (FR2476: P1.4/1.5 UCA0; FR2355: P4.2/4.3 UCA1) live in the `board` module.
-const P1_I2C_PINS: u8 = 0x0C; // BIT2|BIT3 -> UCB0 SDA/SCL
+// The eUSCI bus pins (Leaf-I2C P1.2/3, console-UART) are routed via the `board` module now.
 const P2_SDB: u8 = 0x20; // P2.5 -> IS31FL3730 SDB (drive high to enable). NOT P2.0 — crystal XOUT.
 const P2_RCWL_OUT: u8 = 0x10; // P2.4 <- RCWL-0516 radar OUT (GPIO input, port-interrupt capable).
 
@@ -88,13 +86,10 @@ fn main() -> ! {
     p.wdt_a.wdtctl().write(|w| unsafe { w.bits(WDTPW | WDTHOLD) }); // stop watchdog
     board::clock_init_1mhz(&p);
 
-    // I2C (UCB0) on P1.2/P1.3 — identical on both targets. The pin function is the 2-bit pair
-    // (P1SEL1:P1SEL0); 01 = primary module. Reset leaves P1SEL1=0, but clear it explicitly so we
-    // never silently depend on that and select the secondary/tertiary function.
-    p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_I2C_PINS) }); // SEL1=0
-    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_I2C_PINS) }); // SEL0=1
-    // UART backchannel pins — chip/board-specific (FR2476: P1.4/1.5 UCA0; FR2355: P4.2/4.3 UCA1).
-    board::route_uart_pins(&p);
+    // Bus pins, by semantic role, from the board: Leaf-I²C (sensors, P1.2/3 → UCB0) and the
+    // console UART backchannel (chip/board-specific instance + pins).
+    board::route_leaf_i2c_pins(&p);
+    board::route_console_uart_pins(&p);
     p.pmm.pm5ctl0().modify(|r, w| unsafe { w.bits(r.bits() & !LOCKLPM5) });
 
     // Enable the IS31FL3730 (SDB high on P2.5). Set output high before direction.

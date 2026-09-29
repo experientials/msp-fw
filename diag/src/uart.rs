@@ -5,11 +5,11 @@
 use crate::pac::Peripherals;
 
 pub fn init(p: &Peripherals) {
-    crate::board::uart_init(p);
+    crate::board::console_uart_init(p);
 }
 
 pub fn putc(p: &Peripherals, c: u8) {
-    crate::board::uart_tx(p, c);
+    crate::board::console_uart_tx(p, c);
 }
 
 pub fn puts(p: &Peripherals, s: &str) {

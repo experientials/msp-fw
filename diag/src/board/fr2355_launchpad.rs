@@ -41,20 +41,20 @@ pub fn clock_init_1mhz(p: &Peripherals) {
     }
 }
 
-// UART pins: P4.2/P4.3 -> UCA1 (SEL1:SEL0 = 01). I2C pins (P1.2/3) are routed shared in main.
+// Console-UART pins: P4.2/P4.3 -> UCA1 (SEL1:SEL0 = 01). Leaf-I2C pins are routed in board::mod.
 const P4_UART_PINS: u8 = 0x0C; // BIT2|BIT3
-pub fn route_uart_pins(p: &Peripherals) {
+pub fn route_console_uart_pins(p: &Peripherals) {
     p.p4.p4sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P4_UART_PINS) }); // SEL1=0
     p.p4.p4sel0().modify(|r, w| unsafe { w.bits(r.bits() | P4_UART_PINS) }); // SEL0=1
 }
 
-// eUSCI_A1 UART, 9600 8N1 @ 1 MHz SMCLK (same TI baud table as A0).
+// Console UART = eUSCI_A1, 9600 8N1 @ 1 MHz SMCLK (the FR2355 LaunchPad backchannel; SLAU680 §2.2.4).
 const UCSWRST: u16 = 0x0001;
 const UCSSEL_SMCLK: u16 = 0x0080;
 const UCOS16: u16 = 0x0001;
 const UCTXIFG: u16 = 0x0002;
 
-pub fn uart_init(p: &Peripherals) {
+pub fn console_uart_init(p: &Peripherals) {
     p.e_usci_a1.uca1ctlw0().write(|w| unsafe { w.bits(UCSWRST) });
     p.e_usci_a1
         .uca1ctlw0()
@@ -69,9 +69,19 @@ pub fn uart_init(p: &Peripherals) {
 }
 
 #[inline]
-pub fn uart_tx(p: &Peripherals, c: u8) {
+pub fn console_uart_tx(p: &Peripherals, c: u8) {
     while p.e_usci_a1.uca1ifg().read().bits() & UCTXIFG == 0 {}
     p.e_usci_a1.uca1txbuf().write(|w| unsafe { w.bits(c as u16) });
+}
+
+/// Snapshot the console UART's config regs (CTLW0, BRW, MCTLW) for the SFR dump — reads the
+/// backchannel instance (UCA1 here) so the dump is correct per module, not hardcoded.
+pub fn console_uart_regs(p: &Peripherals) -> (u16, u16, u16) {
+    (
+        p.e_usci_a1.uca1ctlw0().read().bits(),
+        p.e_usci_a1.uca1brw().read().bits(),
+        p.e_usci_a1.uca1mctlw().read().bits(),
+    )
 }
 
 // µs time base: TB1 free-running off SMCLK. FR2355 has no Timer_A; TB0 is the ms base (clock.rs),

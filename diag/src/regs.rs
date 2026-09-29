@@ -185,11 +185,14 @@ pub fn dump(p: &Peripherals) {
     row(p, " UCB0STATW", p.e_usci_b0.ucb0statw().read().bits());
     row(p, " UCB0IFG  ", p.e_usci_b0.ucb0ifg().read().bits());
 
-    // eUSCI_A0 (UART): confirms the console we're reading this on is set as intended.
-    uart::puts(p, "[eUSCI_A0 UART]\n");
-    row(p, " UCA0CTLW0", p.e_usci_a0.uca0ctlw0().read().bits());
-    row(p, " UCA0BRW  ", p.e_usci_a0.uca0brw().read().bits());
-    row(p, " UCA0MCTLW", p.e_usci_a0.uca0mctlw().read().bits());
+    // Console UART: confirms the console we're reading this on is set as intended. The backchannel
+    // instance is board-specific (UCA0 on FR2476, UCA1 on FR2355), so read it via the board rather
+    // than hardcoding UCA0 — otherwise this dumps the wrong (unused) UART on the FR2355.
+    let (uctlw0, ubrw, umctlw) = crate::board::console_uart_regs(p);
+    uart::puts(p, "[console UART]\n");
+    row(p, " UCAxCTLW0", uctlw0);
+    row(p, " UCAxBRW  ", ubrw);
+    row(p, " UCAxMCTLW", umctlw);
 
     row(p, "PM5CTL0", p.pmm.pm5ctl0().read().bits());
     uart::puts(p, "--- end dump ---\n");
