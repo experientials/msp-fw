@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "bsp"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal",
+ "msp430",
+ "msp430fr2355",
+ "msp430fr2476",
+]
+
+[[package]]
 name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -19,12 +29,10 @@ dependencies = [
 name = "diag"
 version = "0.1.0"
 dependencies = [
+ "bsp",
  "devices",
- "embedded-hal",
  "msp430",
  "msp430-rt",
- "msp430fr2355",
- "msp430fr2476",
  "panic-msp430",
  "sched",
 ]

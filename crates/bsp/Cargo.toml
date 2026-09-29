@@ -1,0 +1,19 @@
+[package]
+name = "bsp"
+version = "0.1.0"
+edition = "2021"
+description = "Board support package: chip-select PAC alias, the board semantic peripheral map (clock, console UART, Leaf-I2C, µs timer, pins), the embedded-hal I2c seam, and the Leaf-I2C driver. The shared low-level layer both diag and prod build on (STEM-DIRECTION.md)."
+
+[dependencies]
+msp430 = "0.4"
+# Chip is picked by a mutually-exclusive feature; the consuming crate (diag/prod) forwards it. Each
+# PAC is optional so a build links exactly one. `bsp::pac` re-exports the selected one.
+msp430fr2476 = { path = "../../pac/msp430fr2476", optional = true }
+msp430fr2355 = { path = "../../pac/msp430fr2355", optional = true }
+# embedded-hal 1.0 — the I2c trait the shared `crates/devices` drivers talk to (see `hal`).
+embedded-hal = "1.0"
+
+[features]
+# No default: bsp is never built standalone — the consumer selects the chip (compile_error otherwise).
+fr2476 = ["dep:msp430fr2476"]
+fr2355 = ["dep:msp430fr2355"]

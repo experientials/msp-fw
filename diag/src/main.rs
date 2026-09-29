@@ -1,6 +1,5 @@
 #![no_main]
 #![no_std]
-#![feature(asm_experimental_arch)] // core::arch::asm! for SCG0 (SR bit) during FLL retune
 
 //! bob-929 diagnostic firmware (Rust) — MSP430FR2476.
 //!
@@ -15,24 +14,15 @@ extern crate panic_msp430; // infinitely-looping panic handler
 use msp430_rt::entry;
 use crate::pac::Peripherals;
 
-// Chip select: re-export the one selected PAC as `crate::pac` so every module is chip-agnostic
-// (`use crate::pac::Peripherals`). Exactly one of the mutually-exclusive features must be on.
-#[cfg(feature = "fr2476")]
-pub use msp430fr2476 as pac;
-#[cfg(feature = "fr2355")]
-pub use msp430fr2355 as pac;
-#[cfg(all(feature = "fr2476", feature = "fr2355"))]
-compile_error!("features fr2476 and fr2355 are mutually exclusive — select exactly one chip");
-#[cfg(not(any(feature = "fr2476", feature = "fr2355")))]
-compile_error!("select a chip target: --features fr2476 (default) or --no-default-features --features fr2355");
+// The chip-select PAC alias + the low-level board/hal/i2c layer live in the shared `bsp` crate now
+// (STEM-DIRECTION.md: board/hal must be shared, not inside diag). Re-export them so every diag module
+// keeps using `crate::{pac,board,hal,i2c}` unchanged. The chip feature is forwarded to bsp.
+pub use bsp::{board, hal, i2c, pac};
 
 mod adc;
-mod board; // per-target chip/board specifics: clock, UART instance+pins, µs timer
 mod buttons;
 mod clock;
 mod diag;
-mod hal;
-mod i2c;
 mod is31;
 mod rcwl;
 mod regs;

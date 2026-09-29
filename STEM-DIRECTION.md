@@ -144,6 +144,57 @@ Physical consequence: **Stem-I²C is one shared bus with a distinct slave addres
 two masters on one bus). From a node's own firmware the accessors (`board::stem_i2c()` etc.) always
 mean *this* node — the role qualifier lives in the system/topology layer and the SoM's addressing.
 
+## diag and prod are variants, not separate codebases (verbatim · Henrik 2026-09-29)
+
+*"I need both diag and prod to follow the same patterns and use the same abstractions. They are not
+conceptually different code bases. Rather they should be variants in a dimension. Features of prod are
+features of diag. Features in prod are API centric with occasional timer triggered activity. Features
+in diag are tested/used one at a time to test presence, correctness, load/stress."*
+
+So **diag and prod are two variants along one dimension**, over a **shared** feature set + abstractions,
+not two codebases:
+- A **feature** (a sensor/device, a bus, a subsystem) is implemented **once**, on the shared
+  abstractions (`board` semantic peripheral map, `hal`, `crates/devices`). See
+  [[per-sensor-module-convention]] — one module per sensor, both faces, no fork.
+- **prod** = the **API-centric** variant: features driven by the stembus **API** (the SoM as master)
+  with **occasional timer-triggered** activity. An event/API loop.
+- **diag** = the **test** variant: the **same** features exercised **one at a time** to check
+  **presence, correctness, load/stress**. A sequential test harness.
+- **Feature containment:** every prod feature is a diag feature (prod ⊆ diag); diag additionally holds
+  test-only modes (stress/soak). The *implementations* are shared; only the **harness** differs
+  (API+timer vs one-at-a-time test) — so diag/prod become thin harnesses over shared crates
+  (`board`, `hal`, `devices`, feature modules), not parallel trees.
+
+Implication for the current work: the `board`/`hal` abstractions being built in `diag/` must land in a
+**shared crate** both consume — this is exactly what `hal.rs` already anticipates ("when the board
+crate lands, this type moves there"). The dual-target (chip) dimension and this diag/prod (harness)
+dimension are orthogonal axes over the same shared code.
+
+**prod is a LAYER diag builds ON (Henrik 2026-09-29):** *"I would also include prod code in diag so it
+can be treated as a layer to build on. We would want to test the maximum amount of prod code in the
+diag logic."* So the relationship is a **stack, not two siblings**: prod's real logic (features, API
+handlers, timer behaviour) is factored into a **prod-core library**; the **prod binary** is a thin main
+(the API+timer event loop) over it; and **diag depends on prod-core** and drives its features
+one-at-a-time (+ test-only stress/soak). The point is **coverage**: diag exercises the **actual prod
+code**, not a parallel reimplementation, so the maximum prod surface is under test.
+- Stack: `bsp` (board/hal) + `devices` → **prod-core** (feature/API/timer logic) → { **prod bin** =
+  thin event loop · **diag** = test harness driving prod-core }.
+- **Requirement this imposes:** prod-core features/API-handlers must be **individually invocable** (a
+  callable capability), not buried in the event loop, so diag can drive one at a time and so prod can
+  call them from API/timer. (Same "expose the capability, not a forced `run()`" point as above.)
+- **Size:** the FR2433 15 KB gate applies to the **prod binary**; diag (32 KB budget) carries prod-core
+  + test harness and is expected to be larger — no conflict.
+
+**Sharper still (Henrik 2026-09-29):** *"I would not treat any/much of the prod code as a distinct
+codebase but rather diag as the special case on top of 'normal'."* · *"prod should just be seen as a
+build target/axis."* So **prod is the "normal" baseline**, and **diag is a special-case build axis on
+top of it** — prod/diag is a **build axis** (like the chip axis), NOT two separate codebases. End
+state: **one codebase, two orthogonal build axes** (chip × prod/diag), over shared crates. The
+foundation is `bsp` (board/hal — `crates/bsp`, already scaffolded) + `devices`; "normal" (prod)
+behaviour is the baseline; diag layers the test harness on top. **Immediate blocker:** `board`/`hal`
+wrongly live inside `diag/` — they move into `bsp` first, and both prod and diag build on it (de-forking
+prod's parallel `hal.rs`/`i2c.rs`).
+
 ## Expanders & semantic pin identity (verbatim)
 
 Expanders keep a **current state** on connected pins. An expander also keeps **topical identity** of
