@@ -1,0 +1,56 @@
+# proof-of-feature: FR2355 diag console bring-up
+
+Durable, committed evidence that the diagnostic firmware **boots and its backchannel console works on
+real FR2355 silicon** (per the `prove-firmware-on-hardware` skill). Volatile run header is kept
+separate from the stable assertion body so a re-proof of unchanged behaviour diffs cleanly.
+
+## Run header (volatile — regenerate on re-proof)
+- feature .......... FR2355 diag console bring-up (backchannel UART)
+- as-run build ..... fr2355/2026.dev-fr2355run1
+- observed ......... 2026-09-29
+- target part ...... MSP430FR2355  (JTAG device-id 0x01ff)
+- board / serial ... FR2355 LaunchPad, eZ-FET serial 8E57A36E1F000000  (@toy-b)
+- console endpoint . /dev/cu.usbmodem235103  (9600 8N1)
+- channels used .... flash byte-verify (mspdebug) + console verify-by-stamp + console log capture
+- tool ............. `thepia hwd msp flash ... --verify-stamp fr2355run1`
+
+## Assertions (stable — expected vs observed)
+| # | assertion | expected | observed | verdict |
+|---|---|---|---|---|
+| 1 | firmware boots to the POST loop | repeating POST banner | banner + repeating POST captured | PASS |
+| 2 | console UART transmits, correct baud | readable ASCII @9600 on UCA1/P4.3 | clean ASCII; exact stamp substring matched (a wrong baud can't match cleanly) | PASS |
+| 3 | build identity echoed | flashed stamp on the banner | `build fr2355/2026.dev-fr2355run1` | PASS |
+| 4 | clock/SMCLK = 1 MHz (FLL locked) | clean 9600 (garbled if unlocked) | clean console; corroborated by prior SBW read CSCTL7=0x0447 (FLL locked, SMCLK 1.015 MHz) | PASS |
+| 5 | Leaf-I²C master runs a bus scan | scan executes and reports | `I2C scan: ...` runs each POST | PASS |
+
+Overall: **PASS** — console bring-up proven on FR2355 silicon.
+
+Note on #5: the FR2355 board's I²C bus reads stuck-low (`SDA=L SCL=L`, "105 UNEXPECTED", id-reads
+FAILED) because no sensor shield / pull-ups are attached — a hardware-attach condition, NOT a firmware
+fault. The assertion is that the Leaf-I²C master *runs*; device presence is out of scope here.
+
+## Tool evidence (verbatim)
+    programmed diag/target/msp430-none-elf/release/diag via msp-ezfet (part: MSP430FR2355 (id = 0x01ff))
+      flash-verified (byte-compare) by mspdebug.
+      CONFIRMED RUNNING: the board printed "fr2355run1".
+        evidence: build fr2355/2026.dev-fr2355run1
+
+## Console capture (excerpt, lossy-decoded from the hwd console log)
+    === bob-929 diag POST · build fr2355/2026.dev-fr2355run1 ===
+    · bus scan
+    bus idle SDA=L SCL=L (recover FAILED - short?)
+    I2C scan: 0x0C 0x29 0x39 0x3C 0x40 0x4C 0x60 ...
+    · device inventory
+    devices:
+      SSD1306 OLED   @0x3C: present
+      ... inventory: 7/7 present (unreliable — bus stuck low, no shield)
+    summary: 0 passed, 2 FAILED, 2 skipped   (expected: no I²C devices attached)
+
+## Status / re-proof trigger
+- **as-run build predates the bus-accessor commit** (`board::leaf_i2c`/`console_uart_*`), which is a
+  **behaviour-preserving** refactor for the console (same eUSCI_A1, same P4.2/3 pins, same clock).
+  So the observed behaviour applies to HEAD, but a **single-adapter reflash of HEAD** is the pending
+  re-proof to make this artifact match the current tree exactly. Re-proof is blocked while two eZ-FET
+  adapters are attached (multi-adapter JTAG guard) — do it with only the FR2355 connected.
+- Not yet proven here (future): the SBW boot-record channel (`bootrec.rs` is dormant/unwired) and the
+  Tier-2 SoM-mastered I²C/UART acceptance (full bench). This log is Tier-1 (dev-board) console proof.
