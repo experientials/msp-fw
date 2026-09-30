@@ -40,6 +40,14 @@ pub fn chip_name(id: u16) -> Option<&'static str> {
     match id {
         0x832A => Some("MSP430FR2476"),
         0x832B => Some("MSP430FR2475"),
+        // Confirmed empirically on the bench (2026-09-30): the board with JTAG id 0x01ff (FR2355)
+        // reports TLV device-id 0x830C. FR2155/FR2433 ids still unverified — do not add on a guess
+        // (BUG-2 in docs/BACKLOG.md).
+        0x830C => Some("MSP430FR2355"),
+        // Empirically read over SBW (`msp read 0x1A04`, 2026-09-30) on a JTAG-confirmed FR2433
+        // (id 0x01c6): TLV device-id 0x8240 (past the leading 0x55 read artifact; family-consistent
+        // with FR2476 0x832A / FR2355 0x830C). Not firmware-confirmed — diag doesn't run on fr24xx.
+        0x8240 => Some("MSP430FR2433"),
         _ => None,
     }
 }
@@ -161,10 +169,15 @@ pub fn dump(p: &Peripherals) {
     row(p, " P1OUT ", u16::from(p.p1.p1out().read().bits()));
     row(p, " P1REN ", u16::from(p.p1.p1ren().read().bits()));
     row(p, " P1IN  ", u16::from(p.p1.p1in().read().bits()));
-    pin(p, "P1.2", p1s1, p1s0, p1dir, 0x04, "UCB0SDA (01)");
+    pin(p, "P1.2", p1s1, p1s0, p1dir, 0x04, "UCB0SDA (01)"); // Leaf-I2C — UCB0 on both boards
     pin(p, "P1.3", p1s1, p1s0, p1dir, 0x08, "UCB0SCL (01)");
-    pin(p, "P1.4", p1s1, p1s0, p1dir, 0x10, "UCA0TXD (01)");
-    pin(p, "P1.5", p1s1, p1s0, p1dir, 0x20, "UCA0RXD (01)");
+    // Console UART pins are board-specific (UCA0/P1.4-5 on FR2476, UCA1/P4.2-3 on FR2355) — read the
+    // correct port + expected mux from the board rather than hardcoding P1.4/P1.5 (which was wrong on
+    // FR2355). BUG-1 in docs/BACKLOG.md.
+    let (us1, us0, ud, upins) = crate::board::console_uart_pin_report(p);
+    for (name, bit, want) in upins {
+        pin(p, name, us1, us0, ud, bit, want);
+    }
 
     let p2s1 = u16::from(p.p2.p2sel1().read().bits());
     let p2s0 = u16::from(p.p2.p2sel0().read().bits());

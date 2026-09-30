@@ -79,6 +79,31 @@ pub fn console_uart_regs(p: &Peripherals) -> (u16, u16, u16) {
     )
 }
 
+/// Console-UART pin-mux check for the SFR dump: the correct PORT's (SEL1, SEL0, DIR) + the per-pin
+/// (name, bit, expected). FR2476 backchannel = UCA0 on **P1.4/P1.5**.
+pub fn console_uart_pin_report(
+    p: &Peripherals,
+) -> (u16, u16, u16, [(&'static str, u16, &'static str); 2]) {
+    (
+        u16::from(p.p1.p1sel1().read().bits()),
+        u16::from(p.p1.p1sel0().read().bits()),
+        u16::from(p.p1.p1dir().read().bits()),
+        [("P1.4", 0x10, "UCA0TXD (01)"), ("P1.5", 0x20, "UCA0RXD (01)")],
+    )
+}
+
+// RX side of the console backchannel (prod uses it for the on-demand command trigger; diag is TX-only,
+// hence allow(dead_code) — LTO-stripped from the diag image).
+const UCRXIFG: u16 = 0x0001;
+#[allow(dead_code)]
+pub fn console_uart_rx_ready(p: &Peripherals) -> bool {
+    p.e_usci_a0.uca0ifg().read().bits() & UCRXIFG != 0
+}
+#[allow(dead_code)]
+pub fn console_uart_getc(p: &Peripherals) -> u8 {
+    p.e_usci_a0.uca0rxbuf().read().bits() as u8
+}
+
 // µs time base: TA0 free-running off SMCLK (1 MHz -> 1 µs/tick, wraps every 65.536 ms).
 const TASSEL_SMCLK: u16 = 0x0200; // TASSEL_2
 const MC_CONTINUOUS: u16 = 0x0020; // MC_2

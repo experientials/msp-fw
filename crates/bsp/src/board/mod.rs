@@ -14,7 +14,7 @@
 //!
 //! Each module exposes the same surface (role+type named):
 //!   clock_init_1mhz(p) · route_console_uart_pins(p) · console_uart_init(p) · console_uart_tx(p, b)
-//!   · console_uart_regs(p) · usec_start(p) · usec_now(p) -> u16
+//!   · console_uart_regs(p) · console_uart_pin_report(p) · usec_start(p) · usec_now(p) -> u16
 //! Chip-common role bindings (leaf_i2c, its pin route) live below, shared across modules.
 
 #[cfg(feature = "fr2476")]

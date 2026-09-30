@@ -13,7 +13,10 @@
 //! pin it to a dedicated address when `thepia hwd msp read` lands and we want a hardcoded probe addr.
 
 use crate::uart;
-use msp430fr2355::Peripherals;
+// Chip-agnostic PAC via the shared alias (diag re-exports bsp::pac). NOTE: this file is still
+// dormant (not `mod`-declared) and its snapshot fields assume the fr2355 board (UCA1 ctlw0, p4sel0);
+// full chip-agnosticism is CONV-2 in docs/BACKLOG.md — this de-hardcodes only the PAC import.
+use crate::pac::Peripherals;
 
 /// Boot-stage milestones (advance in `main` as init proceeds). A stalled boot reads back the last
 /// stage it reached → pinpoints the failing init step (e.g. stuck at `ClockSet` ⇒ DCO/SMCLK bug).

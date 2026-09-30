@@ -1,18 +1,22 @@
-# Project hardware config for `thepia hwd` (searched by walking up from the cwd).
-# Hardware-scoped on purpose — this is not a broad `thepia.toml`.
+# thepia hwd board aliases — the fault-resistant identity map for the current bench.
 #
-# [msp] declares the MSP430 flashing defaults for this repo. Declaring `family` EARNS the
-# cross-family guard: `thepia hwd msp flash` checks the declared family against the board's
-# detected part (its runtime TLV device-id) and refuses a mismatch. The guard is a declaration
-# check, not image inspection — so the pinned `image` must be a family-unique artifact that can't
-# be silently overwritten by a build of the other family. `just prod build <family>` emits exactly
-# that: `prod-<family>` (see prod.just). The board's runtime build-id/stamp (verify-by-stamp) is the
-# authoritative counterpart once flashed.
-#
-# Resolution precedence: CLI flag > this config > (no image → error with advice; no family → no guard).
+# IDENTITY = two hardwired, firmware-independent facts:
+#   • which board = the eZ-FET USB serial (below)   — from USB enumeration
+#   • which chip  = the JTAG silicon device-id       — 0x0210 FR2476, 0x01ff FR2355, 0x01c6 FR2433
+# Do NOT trust the "TI MSP430FR2476 LaunchPad" text hwd prints: it's the shared eZ-FET USB PID
+# (2047:0013), identical across variants — not silicon. The JTAG device-id (halted, no firmware) is
+# the authority. KNOWN DEFECT (C32): with >1 eZ-FET attached, live `msp identify`/flash routing
+# collapses — chip-id is only trustworthy SINGLE-ADAPTER. The ids below were each read solo (2026-09-30).
+# (Henrik has many boards; these are the 3 currently on the bench. Old toy-a/toy-b were other units.)
 
-[msp]
-# Primary dev target on the bench today: FR2476 (fr247x family). Change per the attached board.
-family = "fr247x"
-# Family-unique release artifact from `just prod build fr247x` (NOT the clobberable bare `prod`).
-image  = "prod/target/msp430-none-elf/release/prod-fr247x"
+[[board.alias]]
+name = "fr2476"
+serial = "0E5D41510A002800"   # MSP430FR2476, id 0x0210 (fr247x, dual-I²C dev). Console usbmodem233203.
+
+[[board.alias]]
+name = "fr2355"
+serial = "8E57A36E1E000B00"   # MSP430FR2355, id 0x01ff (dual-I²C; the Detector/sensing dev part). Console usbmodem233303.
+
+[[board.alias]]
+name = "fr2433"
+serial = "2FAFB46F29002500"   # MSP430FR2433, id 0x01c6 (fr24xx, single-I²C passive expander). Console usbmodem233103.

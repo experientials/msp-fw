@@ -55,7 +55,8 @@ mod regmap; // I²C-slave register-map contract (PCA9698 emulation + Thepia exte
 // marker). They talk to the chip through the `pac` alias, so the SAME code serves every dual PAC; only
 // the alias differs. The FR24xx (single-I²C) path is a separate idle scaffold. Portable device drivers
 // live in `crates/devices`; only this glue is chip-specific.
-#[cfg(feature = "_dual")]
+// clock init serves the dual path AND the fr24xx console path (a locked 1 MHz SMCLK for a clean UART).
+#[cfg(any(feature = "_dual", feature = "console"))]
 mod clock;
 #[cfg(feature = "_dual")]
 mod enumerate;
@@ -67,7 +68,9 @@ mod mode;
 mod stem;
 // UART logging is the `console` feature (dev only). Off = silent production image; state then lives
 // only in the debug registers (served by the I2C-slave surface). See status.rs / the console question.
-#[cfg(all(feature = "_dual", feature = "console"))]
+// Console/UART is available to ANY family with `console` on (dual + fr24xx). `uart.rs` unifies the
+// eUSCI_A0 field-name difference (e_usci_a0 vs usci_a0_uart_mode) via a macro.
+#[cfg(feature = "console")]
 mod uart;
 
 /// Compiled-in identity stamp (see build.rs). Printed at boot once the UART stub lands.
@@ -133,14 +136,11 @@ fn main() -> ! {
 /// eUSCI_B1 slave). Same code for every dual family; only the PAC alias differs.
 #[cfg(feature = "_dual")]
 fn run_dual(p: &Peripherals) -> ! {
-    // Route only the UART pins (P1.4/P1.5 → UCA0) here — needed for `console`, harmless otherwise.
-    // The SENSOR I²C pins (P1.2/P1.3 → UCB0) are owned by the MODE machine: acquired in Sensing,
-    // released (tri-stated) in Passive. Never routed unconditionally, so a Passive node stays off the bus.
-    const P1_UART_PINS: u8 = 0x30; // BIT4|BIT5
-
+    // Console UART pins via the board — board-aware (UCA0/P1.4-5 on FR2476, UCA1/P4.2-3 on FR2355);
+    // needed for `console`, harmless otherwise. The SENSOR I²C pins (P1.2/P1.3 → UCB0) are owned by the
+    // MODE machine: acquired in Sensing, released in Passive, so a Passive node stays off the bus.
     clock::init_1mhz(p);
-    p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_UART_PINS) });
-    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_UART_PINS) });
+    bsp::board::route_console_uart_pins(p);
 
     let model = model::detect();
 
@@ -374,7 +374,33 @@ fn model_name(m: model::Model) -> &'static str {
 #[cfg(feature = "fr24xx")]
 fn run_fr24xx(p: &Peripherals) -> ! {
     let _ = model::detect();
-    // TODO: FR2433 bring-up — clock, UART banner, USCI_B0 I2C SLAVE surface (regmap), ADC/GPIO.
+
+    // Dev console (`console` feature) — SPIKE (CONV-5): bring up a locked 1 MHz clock + the eUSCI_A0
+    // backchannel UART and print a banner, so an FR2433 node isn't silent on the bench. FR2433 shares
+    // the FLL clock regs + the UCA0 register methods (only the PAC field name differs — uart.rs macro).
+    // The I²C-slave surface (regmap) / ADC / GPIO duties are still TODO (the fr24xx role — GitHub #3).
+    #[cfg(feature = "console")]
+    {
+        const P1_UART_PINS: u8 = 0x30; // BIT4|BIT5 -> UCA0 TXD/RXD on P1.4/P1.5 (verify on the board)
+        clock::init_1mhz(p);
+        p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_UART_PINS) });
+        p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_UART_PINS) });
+        uart::init(p);
+        // SPIKE: re-print the banner continuously so the boot-once timing / late console session
+        // can't miss it. (Production would print once + serve the I2C-slave surface — TODO #3.)
+        loop {
+            uart::puts(p, "== prod v");
+            uart::puts(p, FW_VERSION);
+            uart::putc(p, b' ');
+            uart::puts(p, FW_BUILD);
+            uart::puts(p, " fr24xx (FR2433 Passive) — console up ==\n");
+            for _ in 0..40_000u16 {
+                msp430::asm::nop(); // ~visible cadence @ 1 MHz
+            }
+        }
+    }
+
+    #[cfg(not(feature = "console"))]
     loop {
         let _ = p;
         msp430::asm::nop();

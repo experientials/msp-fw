@@ -84,6 +84,31 @@ pub fn console_uart_regs(p: &Peripherals) -> (u16, u16, u16) {
     )
 }
 
+/// Console-UART pin-mux check for the SFR dump: the correct PORT's (SEL1, SEL0, DIR) + the per-pin
+/// (name, bit, expected). FR2355 backchannel = UCA1 on **P4.2 (RXD) / P4.3 (TXD)** (SLAU680 §2.2.4) —
+/// a DIFFERENT port from FR2476, which is the whole reason the dump must be board-aware.
+pub fn console_uart_pin_report(
+    p: &Peripherals,
+) -> (u16, u16, u16, [(&'static str, u16, &'static str); 2]) {
+    (
+        u16::from(p.p4.p4sel1().read().bits()),
+        u16::from(p.p4.p4sel0().read().bits()),
+        u16::from(p.p4.p4dir().read().bits()),
+        [("P4.2", 0x04, "UCA1RXD (01)"), ("P4.3", 0x08, "UCA1TXD (01)")],
+    )
+}
+
+// RX side of the console backchannel (prod's on-demand command trigger; diag is TX-only → dead_code).
+const UCRXIFG: u16 = 0x0001;
+#[allow(dead_code)]
+pub fn console_uart_rx_ready(p: &Peripherals) -> bool {
+    p.e_usci_a1.uca1ifg().read().bits() & UCRXIFG != 0
+}
+#[allow(dead_code)]
+pub fn console_uart_getc(p: &Peripherals) -> u8 {
+    p.e_usci_a1.uca1rxbuf().read().bits() as u8
+}
+
 // µs time base: TB1 free-running off SMCLK. FR2355 has no Timer_A; TB0 is the ms base (clock.rs),
 // so the µs base uses Timer_B instance 1.
 const TBSSEL_SMCLK: u16 = 0x0200; // TBSSEL_2
