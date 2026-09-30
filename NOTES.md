@@ -293,11 +293,11 @@ schematic (`buttons.rs`).
       `<desc>` marked superseded; `msp-ex/SUPERSEDED.md` written; `HARDWARE.md` caption added. Canonical
       pin map = `crates/bsp/connections.toml`; bus roles = `ziloo/Hardware/stem/STEM-EXPANDER.md`
       "MSP430 supervisor bus scope".
-- [ ] **Locate the original KiCad designs** for the MSP supervisor (and related bob-929/ziloo boards)
-      — the project that produced `TEST-FR2476TPTR.svg` was exported by **Eeschema on 2022/10/01** but
-      is **not in ANY repo in the Talki tree** (searched all 51 `.kicad_sch/.kicad_sym/.lib/.dcm`:
-      none mention FR2476 / MSP430FR24 / TEST-FR2476 / PT0048 / SENSOR_SDA_B1). Only the PNG/SVG exports
-      live in `msp-ex/`. Find the source project (Henrik's machine / an un-imported repo / old backup),
-      import it into the tree, then correct it to `connections.toml` or formally retire it. (Henrik,
-      2026-09-24.)
+- [x] **RETIRED — locating the original KiCad designs.** The 2022 Eeschema project behind
+      `TEST-FR2476TPTR.svg` was searched for and NOT found (repo tree: all 51 KiCad files; iCloud
+      `Talki/` tree: only TI reference designs LP-MSP430FR2476 + MSP-EXP430G2ET, no custom supervisor
+      symbol). **Henrik decided 2026-09-24 to retire this concern — it doesn't matter; NEW designs will
+      be created.** The stale POC render stays bannered/superseded (`msp-ex/SUPERSEDED.md`); the
+      canonical pin map is `crates/bsp/connections.toml` and bus roles are in
+      `ziloo/Hardware/stem/STEM-EXPANDER.md`. No further action; new hardware designs supersede it.
 - [ ] Push `main` to origin (1 commit ahead) when ready.

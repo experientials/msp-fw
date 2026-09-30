@@ -15,7 +15,7 @@
 
 use crate::tasks::{Cx, Mode};
 use crate::{i2c, uart, usec};
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 use sched::Task;
 
 /// A device we can read a fixed-value register from, so each transaction is checkable.

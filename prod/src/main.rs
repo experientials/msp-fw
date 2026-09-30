@@ -39,18 +39,14 @@ compile_error!("prod: enable at least one mode — `--features mode-passive` and
 #[cfg(all(feature = "fr24xx", feature = "mode-sensing"))]
 compile_error!("prod: `mode-sensing` requires a dual-I²C family — FR2433 (fr24xx) is Passive-only");
 
-// PAC alias: the dual-I²C families share ALL the code (`_dual`); they differ only in which PAC is
-// selected here. Every module says `use crate::pac::Peripherals`, so adding a dual family is one arm.
-#[cfg(feature = "fr247x")]
-pub(crate) use msp430fr2476 as pac; // FR2476/FR2475
-#[cfg(feature = "fr215x")]
-pub(crate) use msp430fr2155 as pac; // FR2155 (production)
-#[cfg(feature = "fr235x")]
-pub(crate) use msp430fr2355 as pac; // FR2355 (dev LaunchPad)
+// The chip-select PAC alias + the shared board/hal/i2c layer live in `bsp` (STEM-DIRECTION.md: diag
+// and prod share ONE family/board axis). Re-export `pac` so every module keeps
+// `use crate::pac::Peripherals`; the family feature forwards to exactly one bsp PAC. `hal`/`i2c` (the
+// dual-I²C Leaf bus) are re-exported for the dual families — the SAME shared driver diag uses.
+pub(crate) use bsp::pac;
+use crate::pac::Peripherals;
 #[cfg(feature = "_dual")]
-use crate::pac::Peripherals; // dual-I²C (2× eUSCI_B)
-#[cfg(feature = "fr24xx")]
-use msp430fr2433::Peripherals; // FR2433 — single-I²C slave-only
+pub(crate) use bsp::{hal, i2c};
 
 mod model; // Runtime MSP430 model detection + pin mapping (one image per compatible family).
 mod regmap; // I²C-slave register-map contract (PCA9698 emulation + Thepia extensions). See regmap.rs.
@@ -59,23 +55,25 @@ mod regmap; // I²C-slave register-map contract (PCA9698 emulation + Thepia exte
 // marker). They talk to the chip through the `pac` alias, so the SAME code serves every dual PAC; only
 // the alias differs. The FR24xx (single-I²C) path is a separate idle scaffold. Portable device drivers
 // live in `crates/devices`; only this glue is chip-specific.
-#[cfg(feature = "_dual")]
+// clock init serves the dual path AND the fr24xx console path (a locked 1 MHz SMCLK for a clean UART).
+#[cfg(any(feature = "_dual", feature = "console"))]
 mod clock;
 #[cfg(feature = "_dual")]
-mod hal;
-#[cfg(feature = "_dual")]
-mod i2c;
-#[cfg(feature = "_dual")]
 mod enumerate;
-#[cfg(feature = "_dual")]
+// The I²C-slave surface (status + stem transport + regmap) serves BOTH the dual node (eUSCI_B1) and
+// the fr24xx Passive node (its single eUSCI_B0) — it's the fr24xx node's whole job. `enumerate`/`mode`
+// stay dual-only (no sensor bus / mode machine on the single-I²C part).
+#[cfg(any(feature = "_dual", feature = "fr24xx"))]
 mod status;
 #[cfg(feature = "_dual")]
 mod mode;
-#[cfg(feature = "_dual")]
+#[cfg(any(feature = "_dual", feature = "fr24xx"))]
 mod stem;
 // UART logging is the `console` feature (dev only). Off = silent production image; state then lives
 // only in the debug registers (served by the I2C-slave surface). See status.rs / the console question.
-#[cfg(all(feature = "_dual", feature = "console"))]
+// Console/UART is available to ANY family with `console` on (dual + fr24xx). `uart.rs` unifies the
+// eUSCI_A0 field-name difference (e_usci_a0 vs usci_a0_uart_mode) via a macro.
+#[cfg(feature = "console")]
 mod uart;
 
 /// Compiled-in identity stamp (see build.rs). Printed at boot once the UART stub lands.
@@ -141,14 +139,11 @@ fn main() -> ! {
 /// eUSCI_B1 slave). Same code for every dual family; only the PAC alias differs.
 #[cfg(feature = "_dual")]
 fn run_dual(p: &Peripherals) -> ! {
-    // Route only the UART pins (P1.4/P1.5 → UCA0) here — needed for `console`, harmless otherwise.
-    // The SENSOR I²C pins (P1.2/P1.3 → UCB0) are owned by the MODE machine: acquired in Sensing,
-    // released (tri-stated) in Passive. Never routed unconditionally, so a Passive node stays off the bus.
-    const P1_UART_PINS: u8 = 0x30; // BIT4|BIT5
-
+    // Console UART pins via the board — board-aware (UCA0/P1.4-5 on FR2476, UCA1/P4.2-3 on FR2355);
+    // needed for `console`, harmless otherwise. The SENSOR I²C pins (P1.2/P1.3 → UCB0) are owned by the
+    // MODE machine: acquired in Sensing, released in Passive, so a Passive node stays off the bus.
     clock::init_1mhz(p);
-    p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_UART_PINS) });
-    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_UART_PINS) });
+    bsp::board::route_console_uart_pins(p);
 
     let model = model::detect();
 
@@ -174,11 +169,13 @@ fn run_dual(p: &Peripherals) -> ! {
 
     // The Stem-bus I2C-slave surface (eUSCI_B1): the SoM reads this register file. `rf` holds the
     // live status snapshot (+ PCA9698 shadow); `slave` is the per-transaction state. Polled below.
-    let mut rf = stem::RegFile::new(if mach.is_sensing() {
+    let mut st = if mach.is_sensing() {
         status::Status::from_scan(model, &last)
     } else {
         status::Status::booted(model) // Passive: not enumerated (didn't master the bus)
-    });
+    };
+    st.set_mode(mach.current().code()); // publish the boot mode at MODE_CTRL (0x3E)
+    let mut rf = stem::RegFile::new(st);
     let mut slave = stem::Slave::new();
     stem::init(p);
 
@@ -198,11 +195,47 @@ fn run_dual(p: &Peripherals) -> ! {
         if !model.matches_build_family() {
             uart::puts(p, "!! WRONG-FAMILY FLASH: detected part is not in this image's family\n");
         }
-        uart::puts(p, "commands: s=scan  r=report  d=debug regs  m=switch mode\n");
+        uart::puts(p, "commands: s=scan  r=report  d=debug regs  m=switch mode  l=loopback self-test\n");
         enumerate::report(p, &last);
         rf.status.dump(p);
+        // Boot self-test: drive the eUSCI_B1 SLAVE from the eUSCI_B0 MASTER (needs the P3.2->P1.2 /
+        // P3.6->P1.3 jumpers). Auto-run so hwd's READ-ONLY console captures PASS/FAIL with NO keystroke
+        // — a short-lived agent reads the hwd console log but cannot send the `l` keystroke. No jumpers
+        // → an honest "no response". Only meaningful in Sensing (B0 must be up as master).
+        if mach.is_sensing() {
+            let lb = stem::loopback_selftest(p, &mut slave, &mut rf);
+            uart::puts(p, "loopback B0->B1 @0x");
+            uart::hex8(p, stem::STEM_ADDR as u8);
+            uart::puts(p, " (boot self-test): ");
+            if !lb.ran {
+                uart::puts(p, "no response (fit jumpers P3.2->P1.2, P3.6->P1.3)\n");
+            } else {
+                uart::puts(p, "iface=0x");
+                uart::hex8(p, lb.iface);
+                uart::puts(p, " verMaj=");
+                uart::dec(p, lb.ver_major as u16);
+                uart::puts(p, if lb.passed() { "  PASS\n" } else { "  FAIL\n" });
+            }
+        }
         loop {
             stem::poll(p, &mut slave, &mut rf); // service the SoM/Stem master
+            // A SoM write to MODE_CTRL (0x3E) queues a mode switch; apply it here, out of the poll.
+            if let Some(code) = rf.take_mode_request() {
+                match mode::Mode::from_code(code) {
+                    Some(m) if m != mach.current() => {
+                        apply_mode(p, &mut mach, &mut rf, model, &mut last, m);
+                        uart::puts(p, "mode (SoM) -> ");
+                        uart::puts(p, mach.current().name());
+                        uart::putc(p, b'\n');
+                    }
+                    Some(_) => {} // already in that mode — nothing to do
+                    None => {
+                        uart::puts(p, "mode (SoM): ignoring unsupported code 0x");
+                        uart::hex8(p, code);
+                        uart::putc(p, b'\n');
+                    }
+                }
+            }
             if uart::rx_ready(p) {
                 match uart::getc(p) {
                     b's' | b'S' => {
@@ -210,6 +243,7 @@ fn run_dual(p: &Peripherals) -> ! {
                             last = enumerate::scan(p);
                             enumerate::report(p, &last);
                             rf.status = status::Status::from_scan(model, &last);
+                            rf.status.set_mode(mach.current().code());
                         } else {
                             uart::puts(p, "  (passive: not mastering the sensor bus)\n");
                         }
@@ -218,22 +252,37 @@ fn run_dual(p: &Peripherals) -> ! {
                     b'd' | b'D' => rf.status.dump(p),
                     b'm' | b'M' => {
                         let next = mach.current().toggled();
-                        mach.switch(p, next); // acquire/release the sensor bus for the new mode
+                        apply_mode(p, &mut mach, &mut rf, model, &mut last, next);
                         uart::puts(p, "mode -> ");
                         uart::puts(p, mach.current().name());
                         uart::putc(p, b'\n');
                         if mach.is_sensing() {
-                            last = enumerate::scan(p);
                             enumerate::report(p, &last);
-                            rf.status = status::Status::from_scan(model, &last);
                         } else {
-                            last = enumerate::Scan::absent();
                             uart::puts(p, "  sensor bus released (SoM owns it)\n");
-                            rf.status = status::Status::booted(model);
+                        }
+                    }
+                    b'l' | b'L' => {
+                        if mach.is_sensing() {
+                            let lb = stem::loopback_selftest(p, &mut slave, &mut rf);
+                            uart::puts(p, "loopback B0->B1 @0x");
+                            uart::hex8(p, stem::STEM_ADDR as u8);
+                            uart::puts(p, ": ");
+                            if !lb.ran {
+                                uart::puts(p, "no response (jumper P3.2->P1.2, P3.6->P1.3?)\n");
+                            } else {
+                                uart::puts(p, "iface=0x");
+                                uart::hex8(p, lb.iface);
+                                uart::puts(p, " verMaj=");
+                                uart::dec(p, lb.ver_major as u16);
+                                uart::puts(p, if lb.passed() { "  PASS\n" } else { "  FAIL\n" });
+                            }
+                        } else {
+                            uart::puts(p, "  (loopback needs Sensing: B0 must master the bus)\n");
                         }
                     }
                     b'\r' | b'\n' => {}
-                    _ => uart::puts(p, "  (s=scan r=report d=debug m=mode)\n"),
+                    _ => uart::puts(p, "  (s=scan r=report d=debug m=mode l=loopback)\n"),
                 }
             }
         }
@@ -243,13 +292,43 @@ fn run_dual(p: &Peripherals) -> ! {
     // surface. Poll it forever — this is the node's whole job until wake/INT logic lands.
     #[cfg(not(feature = "console"))]
     {
-        // Production: the boot-default mode is active (its entry action already ran in `boot`);
-        // runtime mode switches arrive over the register interface (TODO: SoM-facing mode register).
-        let _ = (&last, &mach);
+        // Production: the boot-default mode is active (its entry action already ran in `boot`). Runtime
+        // switches arrive as a SoM write to MODE_CTRL (0x3E), applied here out of the slave poll.
         loop {
             stem::poll(p, &mut slave, &mut rf);
+            if let Some(code) = rf.take_mode_request() {
+                if let Some(m) = mode::Mode::from_code(code) {
+                    if m != mach.current() {
+                        apply_mode(p, &mut mach, &mut rf, model, &mut last, m);
+                    }
+                }
+            }
         }
     }
+}
+
+/// Apply a mode switch — from the bench `m` key OR a SoM write to `MODE_CTRL` (0x3E). Centralises what
+/// both triggers must do so they can't drift: hand off the sensor bus (`ModeMachine::switch`), refresh
+/// the scan + the status snapshot the SoM reads, and republish the live mode code at 0x3E.
+#[cfg(feature = "_dual")]
+fn apply_mode(
+    p: &Peripherals,
+    mach: &mut mode::ModeMachine,
+    rf: &mut stem::RegFile,
+    model: model::Model,
+    last: &mut enumerate::Scan,
+    new: mode::Mode,
+) {
+    mach.switch(p, new); // sequenced bus acquire/release (no-op if already there)
+    let mut st = if mach.is_sensing() {
+        *last = enumerate::scan(p);
+        status::Status::from_scan(model, last)
+    } else {
+        *last = enumerate::Scan::absent();
+        status::Status::booted(model)
+    };
+    st.set_mode(mach.current().code());
+    rf.status = st;
 }
 
 /// Boot splash on a connected OLED: firmware version + boot success for ~5 s, then blank the panel
@@ -280,8 +359,8 @@ fn oled_splash(p: &Peripherals, scan: &enumerate::Scan) {
     let _ = oled.off(&mut bus);
 }
 
-/// Model name for the banner (no core::fmt on this budget).
-#[cfg(all(feature = "_dual", feature = "console"))]
+/// Model name for the banner (no core::fmt on this budget). Used by both node paths under `console`.
+#[cfg(feature = "console")]
 fn model_name(m: model::Model) -> &'static str {
     match m {
         model::Model::Fr2476 => "FR2476",
@@ -293,14 +372,58 @@ fn model_name(m: model::Model) -> &'static str {
     }
 }
 
-/// FR24xx (FR2433) single-I²C slave-only node — bring-up TODO. Idle scaffold for now: model detect,
-/// then idle. Real bring-up (FR2433 clock/UART/USCI-slave) lands with an FR2433 board on the bench.
+/// FR24xx (FR2433) single-I²C **slave-only** node. Its whole job: answer the SoM's PCA9698-emulation
+/// register file on the one eUSCI_B0 (UCB0, P1.2/P1.3) — identity/status/version (real) + the GPIO
+/// bank shadow (regmap.rs / stem.rs, the SAME contract the dual node serves on eUSCI_B1). FR2433 is
+/// Passive-only (no sensor master → no scan/mode machine), so it publishes a booted, Passive status
+/// and serves reads/writes forever. Physical GPIO/ADC backing of the banks is the next step (#3).
 #[cfg(feature = "fr24xx")]
 fn run_fr24xx(p: &Peripherals) -> ! {
-    let _ = model::detect();
-    // TODO: FR2433 bring-up — clock, UART banner, USCI_B0 I2C SLAVE surface (regmap), ADC/GPIO.
+    let model = model::detect();
+
+    // Publish identity + booted/Passive status behind the slave surface (no sensor scan on this part).
+    let mut st = status::Status::booted(model);
+    st.set_mode(regmap::MODE_CODE_PASSIVE);
+    let mut rf = stem::RegFile::new(st);
+    let mut slave = stem::Slave::new();
+    stem::init(p); // eUSCI_B0 as I²C slave @ STEM_ADDR on P1.2/P1.3
+
+    // Dev console (`console` feature): a locked 1 MHz clock (clean UART baud) + the eUSCI_A0 backchannel
+    // on P1.4/P1.5 (distinct from UCB0 on P1.2/P1.3 — no pin clash). Print the banner + debug window
+    // ONCE, then fall through to serving the slave. The slave itself needs no clock (the master drives
+    // SCL), so a production (console-off) build serves it on the default DCO with no clock init.
+    #[cfg(feature = "console")]
+    {
+        const P1_UART_PINS: u8 = 0x30; // BIT4|BIT5 -> UCA0 TXD/RXD on P1.4/P1.5 (FR2433 backchannel)
+        clock::init_1mhz(p);
+        p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_UART_PINS) });
+        p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_UART_PINS) });
+        uart::init(p);
+        uart::puts(p, "\n== prod v");
+        uart::puts(p, FW_VERSION);
+        uart::putc(p, b' ');
+        uart::puts(p, FW_BUILD);
+        uart::puts(p, " (");
+        uart::puts(p, model_name(model));
+        uart::puts(p, ") fr24xx Passive — I2C-slave @0x");
+        uart::hex8(p, stem::STEM_ADDR as u8);
+        uart::puts(p, " up ==\n");
+        if !model.matches_build_family() {
+            uart::puts(p, "!! WRONG-FAMILY FLASH: detected part is not in this image's family\n");
+        }
+        rf.status.dump(p); // the exact 0x30–0x3F bytes a master would read
+        // Prove the physical GPIO bank backing end-to-end (no I²C master needed): drive P1.0 via the
+        // regmap OP/IOC path and sense it back on IP. Auto-runs so hwd's READ-ONLY console captures
+        // PASS/FAIL with no keystroke (matches the dual node's boot self-test discipline).
+        let gp = stem::gpio_selftest(p, &mut rf);
+        uart::puts(p, "gpio bank0 self-test (P1.0 drive->sense): ");
+        uart::puts(p, if gp { "PASS\n" } else { "FAIL\n" });
+    }
+
+    // Serve the slave surface forever. A SoM write to MODE_CTRL (0x3E) has nowhere to go on a
+    // Passive-only part — drain and ignore it so the request can't wedge; reads still return PASSIVE.
     loop {
-        let _ = p;
-        msp430::asm::nop();
+        stem::poll(p, &mut slave, &mut rf);
+        let _ = rf.take_mode_request();
     }
 }

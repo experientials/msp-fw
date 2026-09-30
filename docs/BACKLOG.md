@@ -1,0 +1,171 @@
+# msp-fw backlog — tracked tasks & bugfixes
+
+Durable list so findings don't get lost in chat. Each item: **severity · area · evidence · fix ·
+status**. Check the box when done. Keep newest context at the top of each item.
+
+---
+
+## Bugs — found by exact console-output vs source comparison (FR2355 bench, 2026-09-30, build hd2355)
+
+- [x] **BUG-1 · regs.rs pin-expectation table is FR2476-specific** — *DONE 2026-09-30* — `board::
+  console_uart_pin_report` (reads the right port); **hardware-confirmed on FR2355**: dump now prints
+  `P4.2 want=UCA1RXD sel=01 module` / `P4.3 want=UCA1TXD sel=01`, not the old P1.4/5 UCA0.
+  - `diag/src/regs.rs:166-167` hardcode `P1.4="UCA0TXD"`, `P1.5="UCA0RXD"` (the FR2476 UART pins).
+    On FR2355 the console UART is **UCA1 on P4.2/P4.3**, so the SFR dump prints
+    `P1.4 want=UCA0TXD sel=00` — misleading a bench operator into thinking the UART is misconfigured.
+  - Evidence: FR2355 console dump shows the P1.4/5 "want=UCA0…" lines while the UART actually works
+    on UCA1 (the *register* dump `[console UART] UCAx…` — already board-aware — is correct).
+  - Fix: make the pin-expectation table board-aware (have `board` expose the UART **port + pins**), so
+    the dump reads the port the active board uses. NOTE: not the same pattern as the register-dump fix —
+    FR2355's UART pins are on a **different port** (P4 vs P1), so the dump must read P4SEL for fr2355.
+  - Note: I fixed the UART *register* dump (`board::console_uart_regs`) but missed this *pin* table.
+
+- [ ] **BUG-2 · regs.rs chip-id recognition lacks FR2355/FR2155/FR2433** — *low (cosmetic)*
+  - `diag/src/regs.rs:40-42` `chip_name()` maps only `0x832A`→FR2476, `0x832B`→FR2475. FR2355 (TLV
+    id `0x830C` observed on the bench) → prints `MSP430 (unrecognized)`.
+  - Fix, split by confidence:
+    - **FR2355 `0x830C` — DONE 2026-09-30**, hardware-confirmed: `chip_name` now maps it; the board
+      (JTAG id `0x01ff`) prints `chip: MSP430FR2355 id=830C` (was "unrecognized").
+    - **FR2433 `0x8240` — DONE 2026-09-30**, empirically read over SBW (`msp read 0x1A04`) on a
+      JTAG-confirmed FR2433 (id `0x01c6`), stable across reads, past the leading `0x55` artifact.
+      Added to `chip_name`. (Not firmware-confirmed — diag doesn't run on fr24xx, see CONV-4/#3.)
+    - **FR2155 id = gated on FUTURE hardware** — *not just "not attached now."* Henrik 2026-09-30:
+      *"You can only test fr2155 logic with fr2355 dev board until some future where I might have a
+      prod board with 2155."* Reading the FR2355 dev board yields FR2355's TLV (`0x830C`), NOT
+      FR2155's — so FR2155's id can't be captured until a real FR2155 board exists. Do not guess.
+      Item stays open **only** for FR2155.
+
+- [ ] **BUG-3 · WDT-timeout reset loop on a stuck/no-shield I²C bus** — *medium (functional)*
+  - Evidence: `SYSRSTIV=0016` (WDTIFG) + the boot banner **reprints** between POST cycles → the board
+    reboots via the ~16 s watchdog backstop. Bus reads `SDA=L SCL=L` (no sensor shield / no pull-ups).
+  - Likely cause: the POST's I²C ops on a stuck bus (112-addr scan + device inits + `recover`) hog the
+    cooperative loop past the 16 s backstop before `pet_wdt` runs again (the code comments even note
+    "the ~3 s POST hogs the loop").
+  - Fix: bound the POST's total stuck-bus time (or pet the WDT inside long POST work) so a stuck bus
+    degrades gracefully instead of reset-looping. **Confirm** root cause with a sensor shield attached.
+  - Caveat: not confirmed as a regression — no `fr2355run1` reset-cause captured to compare.
+
+---
+
+- [x] **BUG-4 · prod `model.rs` FR2355 id was a placeholder → false "WRONG-FAMILY FLASH"** — *FIXED
+  2026-09-30*. `DEVICE_ID_FR2355 = 0x830C` (was placeholder `0xF235`); FR2476 `0x832A` / FR2433 `0x8240`
+  were already correct. Verified on hardware: FR2355 now boots `(FR2355)`, no wrong-family warning,
+  status `0x0B→0x03`. FR2155 stays a placeholder (no board — can't read its own TLV; see [[diag-prod-variants]]).
+
+## Convergence / tech-debt — from the diag/prod → bsp work (STEM-DIRECTION.md)
+
+- [ ] **CONV-1 · prod `clock.rs`/`uart.rs` → `bsp::board`** — *medium · DESIGN-GATED (not short-term)* · [GitHub #5](https://github.com/experientials/msp-fw/issues/5)
+  - The hal/i2c fork is eliminated (both use `bsp`), but prod still has its own family-generic
+    `clock.rs`/`uart.rs`. Folding them into `bsp::board` is **not just effort** — it embeds a design
+    decision: prod uses **runtime model-detect + pin-map** (`model.rs`, one image per family) vs
+    `bsp::board`'s **compile-time per-`<chip>_<module>`**; and prod targets the **product PCB** while
+    `board` has only LaunchPad modules. Decide the board-layer philosophy first (see #5).
+- [ ] **CONV-2 · `bootrec.rs` de-hardcode** — *low (dormant); PAC import DONE, full agnosticism open*
+  - DONE 2026-09-30: `diag/src/bootrec.rs` now uses `crate::pac::Peripherals` (via diag's bsp re-export),
+    not the hardcoded `msp430fr2355`. Not build-exercised (still `mod`-undeclared/dormant).
+  - Still open: making it *truly* chip-agnostic — its snapshot fields assume the fr2355 board
+    (UCA1 ctlw0, p4sel0). Finish when it's actually wired in.
+- [ ] **CONV-3 · Stem-I²C slave in `bsp::board`** — *feature (prod milestone)* · [GitHub #2](https://github.com/experientials/msp-fw/issues/2)
+  - Add the slave/target uplink (`stem_i2c`) role; needs a non-embedded-hal target abstraction.
+- [x] **CONV-6 · fr24xx (FR2433) I²C-SLAVE / regmap surface — the node's real role** — *DONE (boot-
+  verified) 2026-09-30; physical GPIO/ADC backing + master-reads-slave proof still open*
+  - Built the fr24xx node's whole job: answer the SoM's PCA9698-emulation register file on the single
+    eUSCI_B0 (UCB0). Reused the chip-agnostic contract WHOLESALE — `regmap.rs` unchanged; `RegFile`/
+    `Slave`/`poll` in `stem.rs` unchanged. Only the peripheral seam differs, isolated in a new cfg-split
+    `stem::hw` module: DUAL → `e_usci_b1`/`ucb1*`/P3.2-6 (unchanged); fr24xx → `usci_b0_i2c_mode`/`ucb0*`
+    (IFG = `ucb0ifg_i2c`, mode-split PAC) / P1.2-3. `status.rs` decoupled from the sensor scan
+    (`from_scan` gated `_dual`; `booted`/`read_reg`/`dump` shared). `run_fr24xx` now: detect → booted+
+    Passive status → `stem::init` (UCB0 slave @0x20) → print-once banner+dump (console) → serve loop.
+  - **DUAL PATH PROVEN UNCHANGED**: fr247x+console ELF is **byte-identical** (sha256) to committed HEAD
+    with a pinned `PROD_BUILD` — the `hw`-seam extraction changed zero machine code on the dual families.
+  - **fr24xx BOOT-VERIFIED on the bench** (@fr2433, sanctioned flash+console): the new node runs to the
+    serve loop without faulting (reached the dump AFTER `stem::init`, so UCB0-slave config didn't hang),
+    print-once (not the old reset-loop). The debug window (0x30–0x3F) reads **byte-exact** to source:
+    `D0 40 82 5C BF D9 FD 01 00 00 00 00 01 00 00 00` → IFACE=D0, model=**0x8240 (FR2433)**, build=FDD9BF5C,
+    status=0x01 (**BOOTED, no WRONG_FAMILY** — family recognised), ver=0.1.0, mode=0x00 (**PASSIVE**). Sizes:
+    fr24xx+console 2814 B, **silent production image 918 B** (was a 110 B idle stub).
+  - **UCB0 pins + SEL CONFIRMED (2026-09-30, gap #2 closed):** MSP430FR2433 datasheet **SLASE59F Table
+    6-17 (Port P1 Pin Functions)** — the register-level decode, not an inference: **P1.2 P1SELx=01 →
+    UCB0SIMO/UCB0SDA**, **P1.3 P1SELx=01 → UCB0SOMI/UCB0SCL** (also Fig 4-1 pin identity). Matches
+    `hw::init` (SEL1:0 = 0,1). (Earlier I mis-justified SEL=01 by pointing at the UCA0 console — a
+    *different* peripheral/pins; the P1 table is the correct source and confirms it directly.)
+  - **PHYSICAL GPIO BANK BACKING DONE + BENCH-VERIFIED (2026-09-30, gap #3):** new cfg-split `stem::gpio`
+    seam wires the PCA9698 IP/OP/IOC banks to real ports — bank 0 = P1, bank 1 = P2 (byte ports), with
+    USABLE masks that exclude the reserved bus pins (P1.2/3 I²C, P1.4/5 console → P1_GPIO=0xC3). IOC→PxDIR
+    (`PxDIR=!IOC`), OP→PxOUT, IP←(PxIN^polarity), all masked. Bank 2 (P3) stays shadow (per-bit PAC, only
+    P3.0–2 bonded). Proven on hardware WITHOUT an I²C master via `stem::gpio_selftest`: drive **P1.0**
+    through the RegFile OP/IOC path, sense back on IP → **`gpio bank0 self-test (P1.0 drive->sense): PASS`**
+    → IOC/OP/IP + the RegFile read/write dispatch all work end-to-end on real silicon. Dual path stays
+    **byte-identical** (cfg-split `read_ip`/no-op gpio). fr24xx+console 3138 B, silent 1046 B.
+  - **Mask correction (2026-09-30):** first cut used `P2_GPIO=0xFF` on an unverified "XT1 unpopulated"
+    claim. FIXED to **0xFC** — P2.0/P2.1 are **XOUT/XIN** (LFXT crystal; datasheet Table 6-18), excluded
+    unconditionally so a populated crystal can't be driven. Masks are the datasheet-safe superset (P1:
+    exclude UCB0+UCA0 bus pins; P2: exclude the crystal), still PROVISIONAL vs the product BOM.
+  - **STILL OPEN (honest gaps):** (a) an actual I²C **master reading/writing** the slave on P1.2/P1.3 is
+    UNVERIFIED — the eZ-FET/hwd is not an I²C master, so the boot dump + self-test prove the register FILE,
+    the RegFile dispatch, and the GPIO backing, but NOT the eUSCI_B0 wire-level slave servicing (poll
+    RX/TX/STT/STP). (b) the USABLE masks (which bits are wired as GPIO on the product) are PROVISIONAL
+    pending an FR2433 connections.toml/BOM. (c) bank 2 (P3) + ADC voltages (0x2C/2D) not yet backed.
+
+- [x] **CONV-5 · fr24xx (FR2433) has NO console/debug path** — *DONE 2026-09-30 (superseded by CONV-6:
+  the looping spike graduated to print-once + the serve loop). Original notes kept for the record.*
+  - Symptom: prod's `uart`/console is gated `#[cfg(all(_dual, console))]`; FR2433 isn't `_dual`, so
+    `--features console` is a **no-op** — console and silent builds are byte-identical (110 B). No
+    banner / no debug output on an FR2433. NOT a regression: `run_fr24xx` is an explicit TODO stub, and
+    console was `fr247x`-only historically → never present for fr24xx.
+  - Investigated 2026-09-30 (spike paused before flashing). CORRECTED understanding: the FR2433 UART is
+    **NOT** a different register model — `usci_a0_uart_mode` exposes the SAME accessors
+    (`uca0ctlw0`/`uca0brw`/`uca0mctlw`/`uca0ifg`/`uca0txbuf`/`uca0rxbuf`) as the dual families' eUSCI.
+    The **only** difference is the peripheral **field name**: `usci_a0_uart_mode` (FR2433) vs
+    `e_usci_a0` (dual). (My first attempt used the wrong field name `usci_a0`; and I briefly mis-read a
+    filtered grep as "different registers" — both wrong.)
+  - Tractable fix (the spike): a `uca0!` field-name macro in `prod/uart.rs` (`e_usci_a0` for `_dual`,
+    `usci_a0_uart_mode` for fr24xx; same register methods) + un-gate `mod uart`/`mod clock` for
+    console + clock factory-trim + bounded-wait for fr24xx (FLL regs present, like FR2355) +
+    `run_fr24xx` console (P1.4/5 pins) + flash/verify on the attached FR2433.
+  - **SPIKE SUCCEEDED 2026-09-30 (uncommitted).** FR2433 prints a clean banner
+    `== prod v0.1.0 fr2433/… fr24xx (FR2433 Passive) — console up ==` at correct 9600 baud → proves the
+    macro (usci_a0_uart_mode), the factory-trim clock (clean baud = FLL locked at 1 MHz), and P1.4/5 UCA0
+    (the FR2433 LaunchPad backchannel — confirmed) all work. fr24xx+console = ~500 B (was 110 B silent).
+    Verified the sanctioned way via `thepia hwd console tail` (once EXT-3 was fixed 2026-09-30). Caveat:
+    the spike loops the banner — production is print-once + serve the I2C-slave surface / ADC / GPIO (the
+    real fr24xx role, GitHub #3). Next: tidy to print-once + commit.
+  - Prereq-ish for CONV-4 (a useful fr2433 diag/dev build wants debug output).
+
+- [ ] **CONV-4 · fr2433 diag role** — *design (deferred)* · [GitHub #3](https://github.com/experientials/msp-fw/issues/3)
+  - FR2433 is single-I²C **slave-only** — diag's sensor-scan POST doesn't apply. Design a diag role
+    (exercise the slave/expander + GPIO) when prod's fr2433 node duties exist (today it's a 110 B
+    idle scaffold).
+
+---
+
+## Verification gaps — build-verified, not yet run on hardware
+
+- [ ] **VER-1 · diag on FR2476 (post-refactor)** — build-verified only; run single-adapter on an
+  FR2476 to confirm (same shared code, UCA0 board module).
+- [ ] **VER-2 · prod on hardware (any family)** — never run (scaffold: boots/watchdog/idle). Run when
+  node duties are implemented. · [GitHub #4](https://github.com/experientials/msp-fw/issues/4)
+- [x] **diag on FR2355 (post-refactor)** — DONE 2026-09-30 (build hd2355): CONFIRMED RUNNING + POST;
+  register values match source exactly. See `diag/proofs/console-fr2355.log`.
+
+---
+
+## External — thepia `hwd` (report upstream, not fixed here)
+
+- [ ] **EXT-1 · re-file two thepia reports** — `thepia hwd report` was broken (`agent not embedded /
+  --features goose`); the *flash-unguarded-under-multi-adapter* and *console-non-UTF-8* reports never
+  filed. Retry when the report channel works. (The per-board routing + cache-poison report DID file.)
+- [x] **EXT-3 · thepia console session pins a stale device node (console-side C32)** — *reported + FIXED
+  2026-09-30*. thepia now opens/reads the FR2433 console session (`console-2FAFB46F29002500.log` exists;
+  `console tail --board 2FAFB46F29002500` reads the live looping banner cleanly — em-dash renders, so the
+  old non-UTF-8 `tail` crash is handled too). The FR2433 spike is now verified the sanctioned way.
+
+- [ ] **EXT-4 · thepia console should annotate host EVENTS (flash/reset/session/re-enum)** — *proposal
+  filed 2026-09-30*. Timestamped `[hwd] …` marker lines interleaved with the firmware UART, raw stream
+  kept separately retrievable (so verify-stamp/parsers aren't broken). Motivated by stale-vs-fresh log
+  ambiguity, opaque verify-stamp failures, reset-loop diagnosis, and once-only-banner timing.
+
+- [ ] **EXT-2 · `hwd.toml [msp] family = "fr247x"` stale for FR2355 work** — *thepia-gated, not trivial* —
+  the cross-family guard didn't refuse an FR2355 flash (FR2355 = "unknown-family" to thepia). thepia
+  only knows families `fr247x`/`fr24xx` — there is **no `fr235x`/`fr215x`**, so there's no correct value
+  to set. Fix = either drop the guard (lose it) or wait for thepia to add the dual-family designations.

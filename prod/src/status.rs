@@ -8,6 +8,7 @@
 
 #![allow(dead_code)] // some fields/paths serve the SoM's I2C-slave reads (stem::RegFile) not the bench dump.
 
+#[cfg(feature = "_dual")]
 use crate::enumerate::Scan;
 use crate::model::Model;
 use crate::{regmap, FW_BUILD, FW_VER_MAJOR, FW_VER_MINOR, FW_VER_PATCH};
@@ -37,6 +38,7 @@ pub struct Status {
     dev_count: u8,
     known_present: u8,
     fault: u8,
+    mode: u8, // current operating-mode ABI code (regmap::MODE_CODE_*), reported at MODE_CTRL (0x3E)
 }
 
 /// FNV-1a 32-bit hash of the build stamp → a stable, machine-readable build id the SoM/hwd can match
@@ -53,7 +55,9 @@ fn build_id() -> u32 {
 impl Status {
     /// Assemble the snapshot from the model + a sensor-bus scan. A faulted (wedged) scan sets the
     /// fault flag and withholds BUS_OK + the (bogus) presence data, so the SoM sees an honest fault
-    /// rather than 112 phantom devices.
+    /// rather than 112 phantom devices. DUAL-only: the single-I²C fr24xx (Passive) node never masters
+    /// a sensor bus, so it publishes `booted()` instead.
+    #[cfg(feature = "_dual")]
     pub fn from_scan(model: Model, scan: &Scan) -> Self {
         let mut status = flags::BOOTED | flags::ENUMERATED;
         let mut fault = 0u8;
@@ -69,6 +73,7 @@ impl Status {
                 dev_count: 0,
                 known_present: 0,
                 fault,
+                mode: regmap::MODE_CODE_UNKNOWN, // main sets the live code via set_mode()
             };
         }
         status |= flags::BUS_OK;
@@ -86,6 +91,7 @@ impl Status {
             dev_count: scan.present.count() as u8,
             known_present: known,
             fault,
+            mode: regmap::MODE_CODE_UNKNOWN, // main sets the live code via set_mode()
         }
     }
 
@@ -104,7 +110,14 @@ impl Status {
             dev_count: 0,
             known_present: 0,
             fault: 0,
+            mode: regmap::MODE_CODE_UNKNOWN, // main sets the live code via set_mode()
         }
+    }
+
+    /// Set the current operating-mode code reported at `MODE_CTRL` (0x3E). Called by main after a mode
+    /// switch (and at boot) so the bench dump and the SoM read the SAME live mode.
+    pub fn set_mode(&mut self, code: u8) {
+        self.mode = code;
     }
 
     /// Read one debug register (0x30–0x3F). The shared read path for the slave ISR and the UART dump;
@@ -125,6 +138,7 @@ impl Status {
             regmap::DBG_FW_VER_MAJOR => FW_VER_MAJOR,
             regmap::DBG_FW_VER_MINOR => FW_VER_MINOR,
             regmap::DBG_FW_VER_PATCH => FW_VER_PATCH,
+            regmap::MODE_CTRL => self.mode,
             _ => 0,
         }
     }
@@ -162,6 +176,8 @@ impl Status {
         uart::dec(p, FW_VER_MINOR as u16);
         uart::putc(p, b'.');
         uart::dec(p, FW_VER_PATCH as u16);
+        uart::puts(p, " mode=0x");
+        uart::hex8(p, self.mode);
         uart::putc(p, b'\n');
     }
 }

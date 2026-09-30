@@ -4,7 +4,7 @@
 //! the chip. Every value is the live SFR read back after init, not a constant.
 
 use crate::uart;
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 /// Decode SYSRSTIV (reset-cause vector) to text — values verified against the FR2476 datasheet
 /// (Table 9-x, SYSRSTIV). This is the MCU-self reset-cause check: it turns a mystery reboot into
@@ -40,6 +40,14 @@ pub fn chip_name(id: u16) -> Option<&'static str> {
     match id {
         0x832A => Some("MSP430FR2476"),
         0x832B => Some("MSP430FR2475"),
+        // Confirmed empirically on the bench (2026-09-30): the board with JTAG id 0x01ff (FR2355)
+        // reports TLV device-id 0x830C. FR2155/FR2433 ids still unverified — do not add on a guess
+        // (BUG-2 in docs/BACKLOG.md).
+        0x830C => Some("MSP430FR2355"),
+        // Empirically read over SBW (`msp read 0x1A04`, 2026-09-30) on a JTAG-confirmed FR2433
+        // (id 0x01c6): TLV device-id 0x8240 (past the leading 0x55 read artifact; family-consistent
+        // with FR2476 0x832A / FR2355 0x830C). Not firmware-confirmed — diag doesn't run on fr24xx.
+        0x8240 => Some("MSP430FR2433"),
         _ => None,
     }
 }
@@ -161,10 +169,15 @@ pub fn dump(p: &Peripherals) {
     row(p, " P1OUT ", u16::from(p.p1.p1out().read().bits()));
     row(p, " P1REN ", u16::from(p.p1.p1ren().read().bits()));
     row(p, " P1IN  ", u16::from(p.p1.p1in().read().bits()));
-    pin(p, "P1.2", p1s1, p1s0, p1dir, 0x04, "UCB0SDA (01)");
+    pin(p, "P1.2", p1s1, p1s0, p1dir, 0x04, "UCB0SDA (01)"); // Leaf-I2C — UCB0 on both boards
     pin(p, "P1.3", p1s1, p1s0, p1dir, 0x08, "UCB0SCL (01)");
-    pin(p, "P1.4", p1s1, p1s0, p1dir, 0x10, "UCA0TXD (01)");
-    pin(p, "P1.5", p1s1, p1s0, p1dir, 0x20, "UCA0RXD (01)");
+    // Console UART pins are board-specific (UCA0/P1.4-5 on FR2476, UCA1/P4.2-3 on FR2355) — read the
+    // correct port + expected mux from the board rather than hardcoding P1.4/P1.5 (which was wrong on
+    // FR2355). BUG-1 in docs/BACKLOG.md.
+    let (us1, us0, ud, upins) = crate::board::console_uart_pin_report(p);
+    for (name, bit, want) in upins {
+        pin(p, name, us1, us0, ud, bit, want);
+    }
 
     let p2s1 = u16::from(p.p2.p2sel1().read().bits());
     let p2s0 = u16::from(p.p2.p2sel0().read().bits());
@@ -185,11 +198,14 @@ pub fn dump(p: &Peripherals) {
     row(p, " UCB0STATW", p.e_usci_b0.ucb0statw().read().bits());
     row(p, " UCB0IFG  ", p.e_usci_b0.ucb0ifg().read().bits());
 
-    // eUSCI_A0 (UART): confirms the console we're reading this on is set as intended.
-    uart::puts(p, "[eUSCI_A0 UART]\n");
-    row(p, " UCA0CTLW0", p.e_usci_a0.uca0ctlw0().read().bits());
-    row(p, " UCA0BRW  ", p.e_usci_a0.uca0brw().read().bits());
-    row(p, " UCA0MCTLW", p.e_usci_a0.uca0mctlw().read().bits());
+    // Console UART: confirms the console we're reading this on is set as intended. The backchannel
+    // instance is board-specific (UCA0 on FR2476, UCA1 on FR2355), so read it via the board rather
+    // than hardcoding UCA0 — otherwise this dumps the wrong (unused) UART on the FR2355.
+    let (uctlw0, ubrw, umctlw) = crate::board::console_uart_regs(p);
+    uart::puts(p, "[console UART]\n");
+    row(p, " UCAxCTLW0", uctlw0);
+    row(p, " UCAxBRW  ", ubrw);
+    row(p, " UCAxMCTLW", umctlw);
 
     row(p, "PM5CTL0", p.pmm.pm5ctl0().read().bits());
     uart::puts(p, "--- end dump ---\n");

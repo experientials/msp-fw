@@ -8,17 +8,26 @@ description = "bob-929 diagnostic firmware (Rust) for the MSP430FR2476"
 msp430 = "0.4"
 msp430-rt = "0.4"
 panic-msp430 = "0.4"
-msp430fr2476 = { path = "../pac/msp430fr2476" }
+# The shared low-level layer: chip-select PAC alias, the `board` semantic peripheral map, the `hal`
+# I2c seam, and the Leaf-I2C driver. diag re-exports bsp::{pac,board,hal,i2c} (main.rs) so every
+# module stays chip-agnostic; the chip feature is forwarded to bsp (see [features]).
+bsp = { path = "../crates/bsp" }
 sched = { path = "../crates/sched" }
 # Shared per-sensor drivers (one module per sensor, the standard Device convention) — consumed via
 # the embedded-hal I2c seam in hal.rs. The SAME driver prod uses: diag no longer forks per-sensor
 # code (APDS-9960 migrated off diag/src/apds.rs onto devices::apds9960). An unused device is
 # LTO-stripped, so this costs ROM only for what diag actually calls.
 devices = { path = "../crates/devices" }
-# embedded-hal 1.0 — the bus-trait seam (see hal.rs). Trait definitions only (no code); an unused
-# impl is stripped by LTO, so this costs ~0 ROM. Kept as the portability abstraction for the future
-# crates/devices drivers + product firmware, independent of the (discretionary) graphics-stack trim.
-embedded-hal = "1.0"
+
+[features]
+# Chip select — pick exactly one (mutually exclusive; main.rs compile_error!s otherwise).
+# `default = ["fr2476"]` keeps a bare `cargo build` = the FR2476 dev board; build the FR2355 target
+# with `--no-default-features --features fr2355` (or `just diag build fr2355`).
+default = ["fr2476"]
+fr2476 = ["bsp/fr2476"]
+fr2355 = ["bsp/fr2355"]
+# fr2155 rides the FR2355 LaunchPad (same board module); 32 KB FRAM / 4 KB RAM like fr2355.
+fr2155 = ["bsp/fr2155"]
 
 [profile.release]
 opt-level = "s"

@@ -10,7 +10,7 @@
 //! the frozen crate — the two coexist because only one is active per UI mode.
 
 use crate::i2c;
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const ADDR: u8 = 0x3C;
 const CMD: u8 = 0x00; // control byte: the following bytes are commands

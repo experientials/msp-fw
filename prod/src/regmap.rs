@@ -78,7 +78,17 @@ pub const DBG_FAULT: u8 = 0x3A; // fault flags (reserved bits for now)
 pub const DBG_FW_VER_MAJOR: u8 = 0x3B;
 pub const DBG_FW_VER_MINOR: u8 = 0x3C;
 pub const DBG_FW_VER_PATCH: u8 = 0x3D;
-// 0x3E..=0x3F reserved (read 0).
+// SoM-facing OPERATING-MODE control (Thepia extension, R/W). A master READ returns the current mode
+// code; a master WRITE requests a Passive↔Sensing switch, applied by the firmware's mode machine AFTER
+// the transaction (the switch does sensor-bus acquire/release, which must not run inside the slave
+// poll). The codes are a stable wire ABI, independent of which modes are compiled in; a write of an
+// unknown / not-compiled-in code is ignored. TODO(doc): reflect this register + codes into I2C-API.md
+// and prod/DESIGN.md as canonical.
+pub const MODE_CTRL: u8 = 0x3E;
+pub const MODE_CODE_PASSIVE: u8 = 0x00;
+pub const MODE_CODE_SENSING: u8 = 0x01;
+pub const MODE_CODE_UNKNOWN: u8 = 0xFF; // reported when the current mode has no ABI code
+// 0x3F reserved (read 0).
 
 /// Value returned at [`DBG_IFACE`] — lets a master detect the Thepia debug interface behind the
 /// PCA9698 facade. (`0xD0` = "debug regs, v0"; bump on an incompatible debug-layout change.)

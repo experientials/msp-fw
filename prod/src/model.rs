@@ -19,11 +19,12 @@ const DEVICE_ID_ADDR: u16 = 0x1A04;
 const DEVICE_ID_FR2476: u16 = 0x832A; // FR247x (dual-I²C)
 const DEVICE_ID_FR2475: u16 = 0x832B; // FR247x (dual-I²C)
 const DEVICE_ID_FR2433: u16 = 0x8240; // FR24xx (single-I²C)
-// TODO(fr215x): read the real FR2155 / FR2355 Device IDs from their TLV (0x1A04) — off a board or
-// the datasheet — and replace these placeholders. Distinct sentinels so the match arms compile and
-// don't collide; detection won't classify real FR2155/FR2355 silicon correctly until filled.
-const DEVICE_ID_FR2155: u16 = 0xF215; // PLACEHOLDER — confirm on hardware
-const DEVICE_ID_FR2355: u16 = 0xF235; // PLACEHOLDER — confirm on hardware
+// FR2355 CONFIRMED on hardware (2026-09-30): the JTAG-confirmed FR2355 (id 0x01ff) reports TLV 0x830C
+// (read over SBW at 0x1A04, same as diag's regs::chip_name). FR2155 is still a placeholder — there is
+// no FR2155 board (it's validated on FR2355 hardware, which reads FR2355's TLV, not FR2155's), so its
+// own id can't be read until a real 2155 board exists. Distinct sentinel so the match arm compiles.
+const DEVICE_ID_FR2155: u16 = 0xF215; // PLACEHOLDER — no FR2155 board to confirm
+const DEVICE_ID_FR2355: u16 = 0x830C; // confirmed FR2355 TLV device-id (bench 2026-09-30)
 
 /// A recognised MSP430 model. `Unknown(id)` surfaces unrecognised silicon so boot can flag it rather
 /// than mis-map pins.

@@ -1,7 +1,12 @@
-//! eUSCI_B0 I2C master, 100 kHz. Polled/blocking with bounded waits so a stuck bus
-//! (SDA/SCL held low) reports failure instead of hanging the firmware. Pins routed in main.
+//! eUSCI_B0 I2C master, 100 kHz — the **Leaf** bus (sensors/LCD) in `bsp`, shared by diag and prod
+//! (the union of both: diag's `set_brw` margin sweep + prod's `bus_levels`/`read_reg_pumped`/empty-
+//! write probe). Polled/blocking with bounded waits so a stuck bus reports failure instead of
+//! hanging. UCB0 is present on all four families. Pins routed via `board::route_leaf_i2c_pins`.
+//!
+//! NOTE: on the FR247x this is the *sensor-master* bus. The MCU-bus I2C SLAVE surface (eUSCI_B1,
+//! answering the SoM) is a separate driver — not this file.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const UCSWRST: u16 = 0x0001;
 const UCMODE_3: u16 = 0x0600;
@@ -15,73 +20,69 @@ const UCNACKIFG: u16 = 0x0020;
 const UCTXIFG0: u16 = 0x0002;
 const UCRXIFG0: u16 = 0x0001;
 
-/// Poll bound. One I2C byte @100 kHz is ~90 µs (~a few hundred loop iterations at 1 MHz),
-/// so this is generous but still bails in well under a millisecond of "stuck".
+/// Poll bound. One I2C byte @100 kHz is ~90 µs; this bails in well under a ms of "stuck".
 const SPIN: u16 = 4000;
 
 const SDA_BIT: u8 = 0x04; // P1.2 / UCB0SDA
 const SCL_BIT: u8 = 0x08; // P1.3 / UCB0SCL
 
 fn bitdelay() {
-    // ~half an I2C bit at a slow ~16 kHz — plenty to clock a stuck slave through a byte.
     for _ in 0..30u16 {
         msp430::asm::nop();
     }
 }
 
 fn sda_high(p: &Peripherals) -> bool {
-    // P1IN reflects the real pad level even when the pin is muxed to eUSCI.
     p.p1.p1in().read().bits() & SDA_BIT != 0
 }
 
-/// Recover a wedged bus: if a slave is holding SDA low, temporarily bit-bang P1.2/P1.3 as
-/// GPIO — pulse SCL up to 9 times (until SDA releases), then issue a manual STOP — and hand
-/// the pins back to eUSCI. No-op if SDA is already high. Returns true if SDA ends high.
-/// A `false` return means SDA is still stuck → hardware short, not a wedged slave.
+/// Idle levels of the bus pads (P1IN reflects the real pad even when muxed to eUSCI): `(sda, scl)`
+/// high?. A low SDA at idle = a wedged bus (a slave holding it) → every probe false-ACKs.
+pub fn bus_levels(p: &Peripherals) -> (bool, bool) {
+    let lv = p.p1.p1in().read().bits();
+    (lv & SDA_BIT != 0, lv & SCL_BIT != 0)
+}
+
+/// Recover a wedged bus: bit-bang SCL up to 9 pulses until SDA releases, issue a manual STOP, hand
+/// the pins back to eUSCI. No-op if SDA already high. Returns true if SDA ends high.
 pub fn recover(p: &Peripherals) -> bool {
     if sda_high(p) {
         return true;
     }
-    // P1.2/P1.3 -> GPIO. SDA input (release + read), SCL output driven high.
     p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() & !(SDA_BIT | SCL_BIT)) });
     p.p1.p1out().modify(|r, w| unsafe { w.bits(r.bits() | SCL_BIT) });
     p.p1.p1dir().modify(|r, w| unsafe { w.bits((r.bits() & !SDA_BIT) | SCL_BIT) });
 
     let mut i = 0u8;
     while i < 9 && !sda_high(p) {
-        p.p1.p1out().modify(|r, w| unsafe { w.bits(r.bits() & !SCL_BIT) }); // SCL low
+        p.p1.p1out().modify(|r, w| unsafe { w.bits(r.bits() & !SCL_BIT) });
         bitdelay();
-        p.p1.p1out().modify(|r, w| unsafe { w.bits(r.bits() | SCL_BIT) }); // SCL high
+        p.p1.p1out().modify(|r, w| unsafe { w.bits(r.bits() | SCL_BIT) });
         bitdelay();
         i += 1;
     }
-
-    // Manual STOP: with SCL high, drive SDA low then release it (rising edge = STOP).
+    // Manual STOP: with SCL high, drive SDA low then release (rising edge = STOP).
     p.p1.p1out().modify(|r, w| unsafe { w.bits(r.bits() & !SDA_BIT) });
-    p.p1.p1dir().modify(|r, w| unsafe { w.bits(r.bits() | SDA_BIT) }); // SDA driven low
+    p.p1.p1dir().modify(|r, w| unsafe { w.bits(r.bits() | SDA_BIT) });
     bitdelay();
-    p.p1.p1out().modify(|r, w| unsafe { w.bits(r.bits() | SCL_BIT) }); // SCL high
+    p.p1.p1out().modify(|r, w| unsafe { w.bits(r.bits() | SCL_BIT) });
     bitdelay();
-    p.p1.p1dir().modify(|r, w| unsafe { w.bits(r.bits() & !SDA_BIT) }); // release SDA -> rises
+    p.p1.p1dir().modify(|r, w| unsafe { w.bits(r.bits() & !SDA_BIT) });
     bitdelay();
 
     let freed = sda_high(p);
-    // Best practice: freeing the LINES above isn't enough — the eUSCI master can be left
-    // mid-transaction (a STOP that never completed), which is why a finished transfer could
-    // leave the bus low and force recovery every cycle. Resync the master's state machine with a
-    // UCSWRST toggle (UCMODE/UCMST/UCSSEL/UCBRW are all retained). Skip it when init() is driving
-    // us while already holding the peripheral in reset — its own sequence clears UCSWRST later.
+    // Resync the master state machine (UCSWRST toggle) unless init() already holds it in reset.
     if ctlw0(p) & UCSWRST == 0 {
         p.e_usci_b0.ucb0ctlw0().modify(|r, w| unsafe { w.bits(r.bits() | UCSWRST) });
         p.e_usci_b0.ucb0ctlw0().modify(|r, w| unsafe { w.bits(r.bits() & !UCSWRST) });
     }
-    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | SDA_BIT | SCL_BIT) }); // back to eUSCI
+    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | SDA_BIT | SCL_BIT) });
     freed
 }
 
 pub fn init(p: &Peripherals) {
     p.e_usci_b0.ucb0ctlw0().write(|w| unsafe { w.bits(UCSWRST) }); // hold in reset (releases pins)
-    recover(p); // free a slave holding SDA low before we try to master the bus
+    recover(p); // free a slave holding SDA low before we master the bus
     p.e_usci_b0
         .ucb0ctlw0()
         .modify(|r, w| unsafe { w.bits(r.bits() | UCMODE_3 | UCMST | UCSYNC | UCSSEL_SMCLK) });
@@ -92,8 +93,9 @@ pub fn init(p: &Peripherals) {
 }
 
 /// Change the I²C bit clock: SCL = SMCLK (1 MHz) / `brw`. eUSCI requires UCSWRST to alter the baud
-/// divider, so we toggle it; mode/master/clock-source are retained. Used by the stress margin sweep
-/// to push SCL from 100 kHz (brw=10) up to 1 MHz (brw=1), and to restore it afterwards.
+/// divider, so we toggle it; mode/master/clock-source are retained. Used by diag's stress margin
+/// sweep to push SCL from 100 kHz (brw=10) up to 1 MHz (brw=1), and to restore it afterwards.
+/// (diag-side; prod doesn't margin-sweep — LTO-stripped from the prod image.)
 pub fn set_brw(p: &Peripherals, brw: u16) {
     p.e_usci_b0
         .ucb0ctlw0()
@@ -112,7 +114,6 @@ fn ctlw0(p: &Peripherals) -> u16 {
     p.e_usci_b0.ucb0ctlw0().read().bits()
 }
 
-/// Best-effort STOP, itself bounded so a wedged bus can't hang here either.
 fn stop(p: &Peripherals) {
     p.e_usci_b0
         .ucb0ctlw0()
@@ -126,12 +127,10 @@ fn stop(p: &Peripherals) {
     }
 }
 
-/// Address-only probe: START + addr(W) + STOP. `true` if the device ACKs.
-/// A stuck bus (address never clears) returns `false` rather than hanging.
+/// Address-only probe: START + addr(W) + STOP. `true` if the device ACKs. A stuck bus returns
+/// `false` rather than hanging. (TI's recommended eUSCI_B presence-probe order: read UCNACKIFG only
+/// AFTER the STOP completes.)
 pub fn probe(p: &Peripherals, addr: u8) -> bool {
-    // Self-heal: a previous probe can leave a device holding SDA low (e.g. an OLED left
-    // mid-transaction by an address-only write). Free it before probing the next address,
-    // otherwise every subsequent probe reads the stuck-low SDA as a false ACK.
     if !sda_high(p) {
         recover(p);
     }
@@ -142,10 +141,6 @@ pub fn probe(p: &Peripherals, addr: u8) -> bool {
     p.e_usci_b0
         .ucb0ctlw0()
         .modify(|r, w| unsafe { w.bits(r.bits() | UCTR | UCTXSTT) });
-    // Send the address (UCTXSTT auto-clears once it's out), then STOP, then read UCNACKIFG.
-    // Order matters: UCNACKIFG is only reliable AFTER the STOP completes. Reading it earlier
-    // (right when UCTXSTT clears, or on UCTXIFG0) races the ACK-bit sample and false-ACKs
-    // every empty address. This is TI's recommended eUSCI_B presence-probe order.
     let mut n = 0u16;
     while ctlw0(p) & UCTXSTT != 0 {
         n += 1;
@@ -161,12 +156,12 @@ pub fn probe(p: &Peripherals, addr: u8) -> bool {
     acked
 }
 
-/// Write `data` to `addr` (caller includes any register pointer as data[0]).
-/// Returns `false` on NACK or timeout; never hangs.
+/// Write `data` to `addr` (caller includes any register pointer as data[0]). `false` on NACK or
+/// timeout; never hangs. An empty `data` is an address-only presence probe (see hal.rs).
 pub fn write(p: &Peripherals, addr: u8, data: &[u8]) -> bool {
-    // Self-heal like probe()/read_reg(): a preceding probe can leave a device holding SDA low,
-    // and you can't generate a valid START on a low SDA — so free the bus first or every write
-    // fails at the address phase and wedges the bus (the bug that blanked both displays).
+    if data.is_empty() {
+        return probe(p, addr);
+    }
     if !sda_high(p) {
         recover(p);
     }
@@ -208,9 +203,26 @@ pub fn write(p: &Peripherals, addr: u8, data: &[u8]) -> bool {
     true
 }
 
-/// Set the register pointer at `addr`, repeated-START, and read `buf.len()` bytes into `buf`.
-/// Bounded (never hangs); returns false on NACK or timeout. Used for WHO_AM_I / status reads.
+/// Set the register pointer at `addr` (transmitter, no STOP), repeated-START as receiver, and read
+/// `buf.len()` bytes into `buf`. `false` on NACK/timeout; never hangs. Ported verbatim from diag's
+/// proven `i2c::read_reg` (same FR2476 eUSCI_B) — the register-read primitive the shared device
+/// drivers use via `hal::EusciI2c`'s `write_read`.
 pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
+    read_reg_pumped(p, addr, reg, buf, || {})
+}
+
+/// Like [`read_reg`], but calls `pump` at the top of every spin-wait. Used by the B0↔B1 loopback
+/// self-test (`stem::loopback_selftest`) to service the eUSCI_B1 SLAVE (`stem::poll`) while this
+/// master reads it on the SAME MCU — without the pump the slave's clock-stretch deadlocks the blocking
+/// master. Normal callers use [`read_reg`] (`pump = || {}`, which the optimiser drops). Behaviourally
+/// identical to the ported diag `i2c::read_reg` apart from the injected pump.
+pub fn read_reg_pumped(
+    p: &Peripherals,
+    addr: u8,
+    reg: u8,
+    buf: &mut [u8],
+    mut pump: impl FnMut(),
+) -> bool {
     if buf.is_empty() {
         return false;
     }
@@ -227,6 +239,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
         .modify(|r, w| unsafe { w.bits(r.bits() | UCTR | UCTXSTT) });
     let mut n = 0u16;
     while ifg(p) & (UCTXIFG0 | UCNACKIFG) == 0 {
+        pump();
         n += 1;
         if n >= SPIN {
             stop(p);
@@ -243,6 +256,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
     p.e_usci_b0.ucb0txbuf().write(|w| unsafe { w.bits(reg as u16) });
     n = 0;
     while ifg(p) & UCTXIFG0 == 0 {
+        pump();
         n += 1;
         if n >= SPIN {
             stop(p);
@@ -259,6 +273,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
             // last byte: wait for the repeated-START/address to go out, then arm NACK+STOP.
             n = 0;
             while ctlw0(p) & UCTXSTT != 0 {
+                pump();
                 n += 1;
                 if n >= SPIN {
                     stop(p);
@@ -271,6 +286,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
         }
         n = 0;
         while ifg(p) & UCRXIFG0 == 0 {
+            pump();
             n += 1;
             if n >= SPIN {
                 stop(p);
@@ -281,6 +297,7 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
     }
     n = 0;
     while ctlw0(p) & UCTXSTP != 0 {
+        pump();
         n += 1;
         if n >= SPIN {
             break;
@@ -290,9 +307,10 @@ pub fn read_reg(p: &Peripherals, addr: u8, reg: u8, buf: &mut [u8]) -> bool {
 }
 
 /// Pointer-less receiver read: START(R) + read `buf.len()` bytes + STOP. No register write first —
-/// for devices that return a result to a bare read (Si7021 no-hold measurement result, the
-/// electronic-ID / firmware-rev sequences). Same bounded/self-healing contract as `read_reg`'s
-/// receive phase: never hangs, returns false on NACK or timeout.
+/// for devices that return a result to a bare read (e.g. the Si7021 no-hold measurement result and
+/// its ID/firmware-rev sequences). Ported verbatim from diag's proven `i2c::read`. Bounded/self-
+/// healing like `read_reg`'s receive phase: never hangs; returns false on NACK (device busy/absent)
+/// or timeout — which is exactly the signal a no-hold poll needs ("not ready yet").
 pub fn read(p: &Peripherals, addr: u8, buf: &mut [u8]) -> bool {
     if buf.is_empty() {
         return false;

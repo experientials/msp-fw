@@ -9,7 +9,7 @@
 //! the same firmware works on boards with a different strap.
 
 use crate::i2c;
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const ADDR_LO: u8 = 0x60;
 const ADDR_HI: u8 = 0x63;

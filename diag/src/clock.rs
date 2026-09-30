@@ -10,7 +10,7 @@
 //! The delta is accumulated with a sub-millisecond carry so there is **no rounding drift**:
 //! d ticks contribute `d * 1000 / 32768` ms exactly, remainder carried to the next call.
 
-use msp430fr2476::Peripherals;
+use crate::pac::Peripherals;
 
 const TBSSEL_ACLK: u16 = 0x0100; // TBSSEL_1: clock TB0 from ACLK
 const MC_CONTINUOUS: u16 = 0x0020; // MC_2: count up to 0xFFFF and wrap
