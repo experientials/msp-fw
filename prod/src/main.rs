@@ -60,11 +60,14 @@ mod regmap; // I²C-slave register-map contract (PCA9698 emulation + Thepia exte
 mod clock;
 #[cfg(feature = "_dual")]
 mod enumerate;
-#[cfg(feature = "_dual")]
+// The I²C-slave surface (status + stem transport + regmap) serves BOTH the dual node (eUSCI_B1) and
+// the fr24xx Passive node (its single eUSCI_B0) — it's the fr24xx node's whole job. `enumerate`/`mode`
+// stay dual-only (no sensor bus / mode machine on the single-I²C part).
+#[cfg(any(feature = "_dual", feature = "fr24xx"))]
 mod status;
 #[cfg(feature = "_dual")]
 mod mode;
-#[cfg(feature = "_dual")]
+#[cfg(any(feature = "_dual", feature = "fr24xx"))]
 mod stem;
 // UART logging is the `console` feature (dev only). Off = silent production image; state then lives
 // only in the debug registers (served by the I2C-slave surface). See status.rs / the console question.
@@ -356,8 +359,8 @@ fn oled_splash(p: &Peripherals, scan: &enumerate::Scan) {
     let _ = oled.off(&mut bus);
 }
 
-/// Model name for the banner (no core::fmt on this budget).
-#[cfg(all(feature = "_dual", feature = "console"))]
+/// Model name for the banner (no core::fmt on this budget). Used by both node paths under `console`.
+#[cfg(feature = "console")]
 fn model_name(m: model::Model) -> &'static str {
     match m {
         model::Model::Fr2476 => "FR2476",
@@ -369,40 +372,58 @@ fn model_name(m: model::Model) -> &'static str {
     }
 }
 
-/// FR24xx (FR2433) single-I²C slave-only node — bring-up TODO. Idle scaffold for now: model detect,
-/// then idle. Real bring-up (FR2433 clock/UART/USCI-slave) lands with an FR2433 board on the bench.
+/// FR24xx (FR2433) single-I²C **slave-only** node. Its whole job: answer the SoM's PCA9698-emulation
+/// register file on the one eUSCI_B0 (UCB0, P1.2/P1.3) — identity/status/version (real) + the GPIO
+/// bank shadow (regmap.rs / stem.rs, the SAME contract the dual node serves on eUSCI_B1). FR2433 is
+/// Passive-only (no sensor master → no scan/mode machine), so it publishes a booted, Passive status
+/// and serves reads/writes forever. Physical GPIO/ADC backing of the banks is the next step (#3).
 #[cfg(feature = "fr24xx")]
 fn run_fr24xx(p: &Peripherals) -> ! {
-    let _ = model::detect();
+    let model = model::detect();
 
-    // Dev console (`console` feature) — SPIKE (CONV-5): bring up a locked 1 MHz clock + the eUSCI_A0
-    // backchannel UART and print a banner, so an FR2433 node isn't silent on the bench. FR2433 shares
-    // the FLL clock regs + the UCA0 register methods (only the PAC field name differs — uart.rs macro).
-    // The I²C-slave surface (regmap) / ADC / GPIO duties are still TODO (the fr24xx role — GitHub #3).
+    // Publish identity + booted/Passive status behind the slave surface (no sensor scan on this part).
+    let mut st = status::Status::booted(model);
+    st.set_mode(regmap::MODE_CODE_PASSIVE);
+    let mut rf = stem::RegFile::new(st);
+    let mut slave = stem::Slave::new();
+    stem::init(p); // eUSCI_B0 as I²C slave @ STEM_ADDR on P1.2/P1.3
+
+    // Dev console (`console` feature): a locked 1 MHz clock (clean UART baud) + the eUSCI_A0 backchannel
+    // on P1.4/P1.5 (distinct from UCB0 on P1.2/P1.3 — no pin clash). Print the banner + debug window
+    // ONCE, then fall through to serving the slave. The slave itself needs no clock (the master drives
+    // SCL), so a production (console-off) build serves it on the default DCO with no clock init.
     #[cfg(feature = "console")]
     {
-        const P1_UART_PINS: u8 = 0x30; // BIT4|BIT5 -> UCA0 TXD/RXD on P1.4/P1.5 (verify on the board)
+        const P1_UART_PINS: u8 = 0x30; // BIT4|BIT5 -> UCA0 TXD/RXD on P1.4/P1.5 (FR2433 backchannel)
         clock::init_1mhz(p);
         p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_UART_PINS) });
         p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_UART_PINS) });
         uart::init(p);
-        // SPIKE: re-print the banner continuously so the boot-once timing / late console session
-        // can't miss it. (Production would print once + serve the I2C-slave surface — TODO #3.)
-        loop {
-            uart::puts(p, "== prod v");
-            uart::puts(p, FW_VERSION);
-            uart::putc(p, b' ');
-            uart::puts(p, FW_BUILD);
-            uart::puts(p, " fr24xx (FR2433 Passive) — console up ==\n");
-            for _ in 0..40_000u16 {
-                msp430::asm::nop(); // ~visible cadence @ 1 MHz
-            }
+        uart::puts(p, "\n== prod v");
+        uart::puts(p, FW_VERSION);
+        uart::putc(p, b' ');
+        uart::puts(p, FW_BUILD);
+        uart::puts(p, " (");
+        uart::puts(p, model_name(model));
+        uart::puts(p, ") fr24xx Passive — I2C-slave @0x");
+        uart::hex8(p, stem::STEM_ADDR as u8);
+        uart::puts(p, " up ==\n");
+        if !model.matches_build_family() {
+            uart::puts(p, "!! WRONG-FAMILY FLASH: detected part is not in this image's family\n");
         }
+        rf.status.dump(p); // the exact 0x30–0x3F bytes a master would read
+        // Prove the physical GPIO bank backing end-to-end (no I²C master needed): drive P1.0 via the
+        // regmap OP/IOC path and sense it back on IP. Auto-runs so hwd's READ-ONLY console captures
+        // PASS/FAIL with no keystroke (matches the dual node's boot self-test discipline).
+        let gp = stem::gpio_selftest(p, &mut rf);
+        uart::puts(p, "gpio bank0 self-test (P1.0 drive->sense): ");
+        uart::puts(p, if gp { "PASS\n" } else { "FAIL\n" });
     }
 
-    #[cfg(not(feature = "console"))]
+    // Serve the slave surface forever. A SoM write to MODE_CTRL (0x3E) has nowhere to go on a
+    // Passive-only part — drain and ignore it so the request can't wedge; reads still return PASSIVE.
     loop {
-        let _ = p;
-        msp430::asm::nop();
+        stem::poll(p, &mut slave, &mut rf);
+        let _ = rf.take_mode_request();
     }
 }

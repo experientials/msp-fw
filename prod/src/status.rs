@@ -8,6 +8,7 @@
 
 #![allow(dead_code)] // some fields/paths serve the SoM's I2C-slave reads (stem::RegFile) not the bench dump.
 
+#[cfg(feature = "_dual")]
 use crate::enumerate::Scan;
 use crate::model::Model;
 use crate::{regmap, FW_BUILD, FW_VER_MAJOR, FW_VER_MINOR, FW_VER_PATCH};
@@ -54,7 +55,9 @@ fn build_id() -> u32 {
 impl Status {
     /// Assemble the snapshot from the model + a sensor-bus scan. A faulted (wedged) scan sets the
     /// fault flag and withholds BUS_OK + the (bogus) presence data, so the SoM sees an honest fault
-    /// rather than 112 phantom devices.
+    /// rather than 112 phantom devices. DUAL-only: the single-I²C fr24xx (Passive) node never masters
+    /// a sensor bus, so it publishes `booted()` instead.
+    #[cfg(feature = "_dual")]
     pub fn from_scan(model: Model, scan: &Scan) -> Self {
         let mut status = flags::BOOTED | flags::ENUMERATED;
         let mut fault = 0u8;

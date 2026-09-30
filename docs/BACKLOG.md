@@ -67,7 +67,48 @@ status**. Check the box when done. Keep newest context at the top of each item.
     (UCA1 ctlw0, p4sel0). Finish when it's actually wired in.
 - [ ] **CONV-3 · Stem-I²C slave in `bsp::board`** — *feature (prod milestone)* · [GitHub #2](https://github.com/experientials/msp-fw/issues/2)
   - Add the slave/target uplink (`stem_i2c`) role; needs a non-embedded-hal target abstraction.
-- [ ] **CONV-5 · fr24xx (FR2433) has NO console/debug path** — *medium (dev ergonomics); real bring-up*
+- [x] **CONV-6 · fr24xx (FR2433) I²C-SLAVE / regmap surface — the node's real role** — *DONE (boot-
+  verified) 2026-09-30; physical GPIO/ADC backing + master-reads-slave proof still open*
+  - Built the fr24xx node's whole job: answer the SoM's PCA9698-emulation register file on the single
+    eUSCI_B0 (UCB0). Reused the chip-agnostic contract WHOLESALE — `regmap.rs` unchanged; `RegFile`/
+    `Slave`/`poll` in `stem.rs` unchanged. Only the peripheral seam differs, isolated in a new cfg-split
+    `stem::hw` module: DUAL → `e_usci_b1`/`ucb1*`/P3.2-6 (unchanged); fr24xx → `usci_b0_i2c_mode`/`ucb0*`
+    (IFG = `ucb0ifg_i2c`, mode-split PAC) / P1.2-3. `status.rs` decoupled from the sensor scan
+    (`from_scan` gated `_dual`; `booted`/`read_reg`/`dump` shared). `run_fr24xx` now: detect → booted+
+    Passive status → `stem::init` (UCB0 slave @0x20) → print-once banner+dump (console) → serve loop.
+  - **DUAL PATH PROVEN UNCHANGED**: fr247x+console ELF is **byte-identical** (sha256) to committed HEAD
+    with a pinned `PROD_BUILD` — the `hw`-seam extraction changed zero machine code on the dual families.
+  - **fr24xx BOOT-VERIFIED on the bench** (@fr2433, sanctioned flash+console): the new node runs to the
+    serve loop without faulting (reached the dump AFTER `stem::init`, so UCB0-slave config didn't hang),
+    print-once (not the old reset-loop). The debug window (0x30–0x3F) reads **byte-exact** to source:
+    `D0 40 82 5C BF D9 FD 01 00 00 00 00 01 00 00 00` → IFACE=D0, model=**0x8240 (FR2433)**, build=FDD9BF5C,
+    status=0x01 (**BOOTED, no WRONG_FAMILY** — family recognised), ver=0.1.0, mode=0x00 (**PASSIVE**). Sizes:
+    fr24xx+console 2814 B, **silent production image 918 B** (was a 110 B idle stub).
+  - **UCB0 pins + SEL CONFIRMED (2026-09-30, gap #2 closed):** MSP430FR2433 datasheet **SLASE59F Table
+    6-17 (Port P1 Pin Functions)** — the register-level decode, not an inference: **P1.2 P1SELx=01 →
+    UCB0SIMO/UCB0SDA**, **P1.3 P1SELx=01 → UCB0SOMI/UCB0SCL** (also Fig 4-1 pin identity). Matches
+    `hw::init` (SEL1:0 = 0,1). (Earlier I mis-justified SEL=01 by pointing at the UCA0 console — a
+    *different* peripheral/pins; the P1 table is the correct source and confirms it directly.)
+  - **PHYSICAL GPIO BANK BACKING DONE + BENCH-VERIFIED (2026-09-30, gap #3):** new cfg-split `stem::gpio`
+    seam wires the PCA9698 IP/OP/IOC banks to real ports — bank 0 = P1, bank 1 = P2 (byte ports), with
+    USABLE masks that exclude the reserved bus pins (P1.2/3 I²C, P1.4/5 console → P1_GPIO=0xC3). IOC→PxDIR
+    (`PxDIR=!IOC`), OP→PxOUT, IP←(PxIN^polarity), all masked. Bank 2 (P3) stays shadow (per-bit PAC, only
+    P3.0–2 bonded). Proven on hardware WITHOUT an I²C master via `stem::gpio_selftest`: drive **P1.0**
+    through the RegFile OP/IOC path, sense back on IP → **`gpio bank0 self-test (P1.0 drive->sense): PASS`**
+    → IOC/OP/IP + the RegFile read/write dispatch all work end-to-end on real silicon. Dual path stays
+    **byte-identical** (cfg-split `read_ip`/no-op gpio). fr24xx+console 3138 B, silent 1046 B.
+  - **Mask correction (2026-09-30):** first cut used `P2_GPIO=0xFF` on an unverified "XT1 unpopulated"
+    claim. FIXED to **0xFC** — P2.0/P2.1 are **XOUT/XIN** (LFXT crystal; datasheet Table 6-18), excluded
+    unconditionally so a populated crystal can't be driven. Masks are the datasheet-safe superset (P1:
+    exclude UCB0+UCA0 bus pins; P2: exclude the crystal), still PROVISIONAL vs the product BOM.
+  - **STILL OPEN (honest gaps):** (a) an actual I²C **master reading/writing** the slave on P1.2/P1.3 is
+    UNVERIFIED — the eZ-FET/hwd is not an I²C master, so the boot dump + self-test prove the register FILE,
+    the RegFile dispatch, and the GPIO backing, but NOT the eUSCI_B0 wire-level slave servicing (poll
+    RX/TX/STT/STP). (b) the USABLE masks (which bits are wired as GPIO on the product) are PROVISIONAL
+    pending an FR2433 connections.toml/BOM. (c) bank 2 (P3) + ADC voltages (0x2C/2D) not yet backed.
+
+- [x] **CONV-5 · fr24xx (FR2433) has NO console/debug path** — *DONE 2026-09-30 (superseded by CONV-6:
+  the looping spike graduated to print-once + the serve loop). Original notes kept for the record.*
   - Symptom: prod's `uart`/console is gated `#[cfg(all(_dual, console))]`; FR2433 isn't `_dual`, so
     `--features console` is a **no-op** — console and silent builds are byte-identical (110 B). No
     banner / no debug output on an FR2433. NOT a regression: `run_fr24xx` is an explicit TODO stub, and
@@ -118,6 +159,11 @@ status**. Check the box when done. Keep newest context at the top of each item.
   2026-09-30*. thepia now opens/reads the FR2433 console session (`console-2FAFB46F29002500.log` exists;
   `console tail --board 2FAFB46F29002500` reads the live looping banner cleanly — em-dash renders, so the
   old non-UTF-8 `tail` crash is handled too). The FR2433 spike is now verified the sanctioned way.
+
+- [ ] **EXT-4 · thepia console should annotate host EVENTS (flash/reset/session/re-enum)** — *proposal
+  filed 2026-09-30*. Timestamped `[hwd] …` marker lines interleaved with the firmware UART, raw stream
+  kept separately retrievable (so verify-stamp/parsers aren't broken). Motivated by stale-vs-fresh log
+  ambiguity, opaque verify-stamp failures, reset-loop diagnosis, and once-only-banner timing.
 
 - [ ] **EXT-2 · `hwd.toml [msp] family = "fr247x"` stale for FR2355 work** — *thepia-gated, not trivial* —
   the cross-family guard didn't refuse an FR2355 flash (FR2355 = "unknown-family" to thepia). thepia
