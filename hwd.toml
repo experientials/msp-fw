@@ -8,6 +8,11 @@
 # the authority. KNOWN DEFECT (C32): with >1 eZ-FET attached, live `msp identify`/flash routing
 # collapses — chip-id is only trustworthy SINGLE-ADAPTER. The ids below were each read solo (2026-09-30).
 # (Henrik has many boards; these are the 3 currently on the bench. Old toy-a/toy-b were other units.)
+#
+# NON-eZ-FET boards use a DIFFERENT identity. The RP2040 below is NOT an MSP430/eZ-FET board: it has no
+# JTAG device-id and no eZ-FET. Its `serial` is the RP2040's **BOOTSEL USB serial = QSPI flash unique
+# id** (the `picotool --ser` key). Loading is USB (picotool), not SBW — see docs/proposals/
+# thepia-hwd-pico-support.md for the proposed `hwd rp2`/`pico` support.
 
 [[board.alias]]
 name = "fr2476"
@@ -20,3 +25,8 @@ serial = "8E57A36E1E000B00"   # MSP430FR2355, id 0x01ff (dual-I²C; the Detector
 [[board.alias]]
 name = "fr2433"
 serial = "2FAFB46F29002500"   # MSP430FR2433, id 0x01c6 (fr24xx, single-I²C passive expander). Console usbmodem233103.
+
+[[board.alias]]
+name = "rp2040"
+serial = "E0C9125B0D9B"        # RP2040 rev B2 — bench dev HOST / M7 stand-in. Serial = BOOTSEL flash-uid
+                               # (picotool --ser key), NOT eZ-FET. Blank flash as of 2026-09-30 (RP2 Boot).

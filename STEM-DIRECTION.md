@@ -57,6 +57,145 @@ supervisor (FR2355) and **Passive** ≈ pure I/O-extender/slave (FR2433 expander
 topic-pin) model above. **To define:** what the daughterboard I/O-expander role adds beyond the
 existing FR2433 Stembus Expander.
 
+## Bench/dev host — RP2040 deep bus-inspection module (verbatim · Henrik 2026-09-30)
+
+> **New Stem member, the first non-MSP430 core to land.** Distinct from the **RP2350** "Inner vision"
+> product node in the role table above — this **RP2040** is a **master/host** (a dev SoM stand-in),
+> not a slave node.
+
+Verbatim (Henrik 2026-09-30):
+
+> *"I want to add an RP2040 profile for putting a dev-time firmware on it via USB. I want it to connect
+> to both Leaf and Stem I2C and possibly also SPI. This isn't the role/variant that we might put in
+> products but more of a dev-time that can be used to deep inspect internal busses. It would have access
+> to the full stem bus including PMIC/boot pins for UCM i.MX 8M Plus, and other internal pins. This might
+> be a dev/debug module that can be slotted into products for deep tests. It will start out as something
+> for bench testing MCUs and sensors."*
+
+And the recurring structural principle (verbatim · Henrik 2026-09-30):
+
+> *"I again want a prod base that can grow into something used in the products."*
+
+And the purpose — an M7 stand-in for automated testing (verbatim · Henrik 2026-09-30):
+
+> *"This new firmware will allow you to run ad-hoc and soak tests fully automated without an attached
+> UCM board directly from a Mac or Linux machine duplicating what the UCM SoM M7 will be able to do
+> mastering the system."*
+
+**Derived (not verbatim), for planning — reconciles with the `prod`-baseline principle above:** even
+though the RP2040's *initial use* is a dev/bench bus inspector, its firmware is structured as a proper
+**prod base** (foundation) with the dev/inspection capability layered on top — the same "prod is the
+normal baseline; the test/dev harness is a build axis on top" stack proven for MSP430, so it's
+product-quality and can grow (including possibly shipping as an in-product slotted debug module). The
+RP2040 is the **master** side of the SAME chip-agnostic contracts the MSP430 nodes serve as slaves
+(`regmap`, the stembus protocol, the semantic Stem/Leaf bus roles) — so it reuses those contracts, but
+needs its **own** `board`/`hal` layer (Cortex-M0+, `thumbv6m`, a Rust RP2040 HAL) since it shares no
+silicon with MSP430. This is the moment "proper HAL to manage the exact mcu models" (above) starts to
+be real — extract cross-core abstractions **as this second core lands**, not ahead of it.
+
+**The defining purpose = a UCM SoM M7 stand-in for host-driven automated testing.** The RP2040 masters
+the stem system exactly as the i.MX 8M Plus's real-time **M7** core will, so **fully-automated ad-hoc +
+soak tests run from a Mac/Linux machine (and CI) with NO UCM attached** — and, because it duplicates
+the M7's mastering role, the test behaviour transfers to the real M7. This makes the stem system
+testable in CI without a UCM in the loop (ties to the Big Bob bench / CI-hardware objective). Design
+consequence: the host's capability set (`host-core`) should mirror the **M7's intended stembus-master
+API**, so the same test harness can target the RP2040 (bench/CI) or the real M7 (on a UCM). See the
+design doc [docs/RP2040-BENCH-HOST.md](docs/RP2040-BENCH-HOST.md).
+
+### Structural direction across MCUs (verbatim · Henrik 2026-09-30)
+
+> 1. *"special debug firmware makes sense in a special location. prod crates do not"*
+> 2. *"I start with RP2040, but will surely use RP2350 in the future"*
+> 3. *"I will likely use Arducam TinyML board with a camera. This could be a dev base for something we
+>    put in a product"*
+> 4. *"Common crates should be common. We don't want duplication of crates that can be common. We don't
+>    want forced commons that is full of if statements"*
+> 5. *"You want to pick toolchain for building carefully so we can also add in nRF52 modules in the
+>    future"*
+
+**Derived synthesis (not verbatim) — the structure these imply:**
+- **The shared surface is THIN, and consistency comes from COMMON TESTS, not shared code (4; Henrik
+  2026-09-30: *"I can imagine the shared surface between the major families to be quite limited"* ·
+  *"organise it as common tests across islands but no shared code. The bit that is common could be just
+  duplicated, but kept in check with common tests"*).** The common bit — the **protocol/contract**
+  (regmap + stembus line semantics) — is **small** and crosses language/runtime boundaries (Rust-sync
+  MSP430, Rust-async RP/nRF, **C** CYPM1111), so a shared Rust crate can't span it anyway (the C island
+  would port/duplicate regardless). Chosen model:
+  - **One canonical spec** = [I2C-API.md](I2C-API.md) + the PCA9698 tables (the single source of truth;
+    `regmap.rs` is already *derived* from it — keep it that way).
+  - **Each island implements it itself** (its own language/runtime) — **duplication by design**, not a
+    forced common crate.
+  - **A common conformance suite keeps them honest** — and we already have the tester: the **RP2040
+    host** masters every node, so the "common tests across islands" ARE the host's ad-hoc/soak suite
+    driving each island's slave surface against the spec, plus shared **test vectors** (data, not code)
+    an island's own unit tests can run. CI gates on conformance. (Tradeoff: duplication drifts if the
+    suite misses a case — so "passes the conformance suite" *is* the definition of conformant.)
+  - **Same-language device-driver overlap** (e.g. a sensor the Detector and the host both read) MAY
+    still be a shared Rust crate if a real overlap lands, but default to the same duplicate-plus-test
+    discipline; extract-on-proven-overlap still governs, just with a higher bar for shared *code*.
+
+  Everything else is **per family**: runtime/framework (embassy async vs MSP430 sync-poll vs CYPM1111
+  C), HAL, board/pins, feature logic. Even `crates/sched` is **island-side** (MSP430) — embassy nodes
+  use embassy's executor. **Principle: the spec + the conformance suite are the common denominator;
+  shared code is the exception, never the mechanism for consistency.**
+
+### Public master-side client — the `stembus` client for the M7 (Zephyr) & the host (verbatim · Henrik 2026-09-30)
+
+> *"I would also imagine that stem repo would include a public crate/lib that can be used by the repo
+> building M7 Zephyr based firmware."*
+
+**Derived — this sharpens the master/slave split (the ONE place shared code is warranted):**
+- **Slave side (the nodes):** many, constrained, divergent (MSP430 · CYPM1111 · …) → **duplicate +
+  conformance-test** (above). No shared slave code.
+- **Master side (the SoM/**M7** · the RP2040 stand-in · the Mac/Linux CI harness):** few, capable, and
+  they *want* parity — so a **shared, public master client** earns its keep. The stem repo **publishes**
+  a stable, versioned **`stembus` client** (scan nodes, read/write regmap, sequence control lines) — the
+  portable master protocol logic, abstracted over a **transport**: local I²C for the M7/host;
+  remote-over-USB for the Mac/Linux harness (talking *through* the RP2040 host).
+- **Bindings (depends on the M7 repo's language, decided when it starts):** a **Rust crate** (RP2040
+  host + CI harness + any Rust-on-Zephyr) and a **C library / Zephyr module** for mainstream C Zephyr.
+  Both derive from the canonical spec and are kept honest by the **same conformance suite** — so this
+  shared code does NOT reintroduce drift.
+- **Payoff + discipline:** the RP2040 host's `host-core` **is** this client (concrete transport = its
+  own I²C); the M7 uses the same client → "the RP2040 duplicates what the M7 does" becomes *literal*
+  and the ad-hoc/soak tests transfer to the real M7. This is the one crate with **public-API
+  discipline** (semver, docs, stability) — an **external repo depends on it**, unlike internal firmware.
+- **Per-arch HAL/board crates stay SEPARATE, never cfg-merged across unrelated silicon (2,4):** MSP430
+  `bsp` (msp430-hal) · a `rp-bsp` covering **RP2040 + RP2350** (a chip axis *within* the RP family,
+  the same idea as the MSP430 family axis) · a future `nrf-bsp`. Each exposes the semantic bus roles
+  (`stem_i2c`/`leaf_i2c`/`console`/`spi`) + embedded-hal, so the common layer stays chip-agnostic. This
+  is exactly the "common is common; forced if-riddled commons are not" line: share the contract, keep
+  the silicon separate.
+- **Toolchain/framework = `embassy` for the parts it supports (2,5):** the one async framework
+  spanning **RP2040 / RP2350 / nRF52** (embassy-rp, embassy-nrf), unified by embedded-hal(-async) —
+  what (5) "add nRF52 later" + (4) "don't duplicate" jointly point to (one framework, not per-chip
+  ecosystems). Targets: `thumbv6m` (RP2040), `thumbv8m.main-eabihf` (RP2350-ARM), `thumbv7em-eabihf`
+  (nRF52). Async is a real tradeoff vs the MSP430 polled style, accepted for the ARM-side unification.
+- **TWO non-embassy islands — MSP430 and the CYPM1111 (Power role) (2,4):** `embassy` is NOT a
+  universal target. **MSP430** (msp430-hal) is one island; the **CYPM1111** (Power-supply role;
+  Cortex-**M0**, `thumbv6m`, dev board CY7111) is another — a Cypress/Infineon part (PMG1/PSoC-class,
+  ModusToolbox/C-first) that embassy does not cover (whether it has any Rust HAL at all = **verify when
+  the Power role starts**; may be C-only). Consequence: **the sharing boundary sits BELOW embassy** —
+  on `embedded-hal` + the **pure contract crate** — so the common crates (`crates/stembus`,
+  `crates/devices`) **must not depend on embassy**, letting both islands share them. embassy is a
+  framework choice for RP/nRF, never the common denominator.
+- **The CYPM1111 is a planned stem NODE, and it forces the contract to be language-neutral (2,4):**
+  the Power role is a node on the stembus — it serves the **same `regmap`/stembus contract as a slave**
+  (the triplet: `stem_i2c` slave, its own `leaf_i2c`, `console`), so the RP2040 host + the shared
+  contract reach it exactly like an MSP430 node. But because it's likely **C (ModusToolbox)**, the
+  contract **cannot be Rust-only**: its **canonical source stays language-neutral** — the register map
+  is already *derived* from [I2C-API.md](I2C-API.md) + the PCA9698 spec (see `prod/src/regmap.rs`'s
+  header), so `crates/stembus` (Rust) and a generated **C header** are two *bindings* of the one spec.
+  Sharing is therefore at the **protocol level** across all four groups: embassy-Rust nodes (RP/nRF),
+  the MSP430 island, and the CYPM1111 C island. (This also anchors the field-update scheme — the
+  CYPM1111's **row-based flash** is the granule, see §"Field-updatable firmware".)
+- **Debug firmware lives in a SPECIAL location; prod crates do not (1):** the RP bench/bus-inspector
+  (M7-stand-in) **binary** is segregated (e.g. a top-level `debug/` or `bench/`), built **on** the
+  normal prod + common crates — but prod/product-capable crates never live in the debug area.
+- **Boards incl. Arducam (3):** `rp-bsp` models boards as **(chip, module)** — a Pico-class bench host
+  **and** the **Arducam TinyML + camera** board, the latter a dev base for a product (the **Inner
+  vision** role, RP2350 in the table above). Same (chip, module, node-role) granularity as MSP430.
+
 ## Field-updatable firmware & integrity — FUTURE MILESTONE (verbatim)
 
 > **Deferred.** Henrik (2026-09-25): *"I will return to this topic in a future milestone."* Not now —
