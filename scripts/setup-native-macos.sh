@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Set up a NATIVE macOS build of the msp-fw Rust firmware — no amd64 Docker emulation.
+# Set up a NATIVE macOS build of the stem Rust firmware — no amd64 Docker emulation.
 #
 # Segregation is the whole point: the pinned Rust nightly lives in a DEDICATED toolchain home
 # (default ~/.local/share/msp430-rust), NEVER in ~/.rustup and NEVER as the system-default rustc.

@@ -11,7 +11,7 @@
 FROM ubuntu:24.04
 
 ARG RUST_TOOLCHAIN=nightly-2025-06-25          # keep in sync with diag/rust-toolchain.toml
-ARG MSP430_GCC_REPO=experientials/msp-fw
+ARG MSP430_GCC_REPO=experientials/stem
 ARG MSP430_GCC_TAG=msp430-gcc-9.3.1
 ARG MSP430_GCC_ASSET=msp430-elf-gcc-9.3.1-linux-x86_64.tar.xz
 

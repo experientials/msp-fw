@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Cooperative, run-to-completion task scheduler for msp-fw.
+//! Cooperative, run-to-completion task scheduler for stem.
 //!
 //! The model: there is one stack and no preemption. Each task's [`Task::poll`] runs **one short,
 //! non-blocking step** and returns; the scheduler calls it again when its next period is due.

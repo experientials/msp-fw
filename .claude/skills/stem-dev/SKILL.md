@@ -1,12 +1,12 @@
 ---
-name: msp-fw-dev
+name: stem-dev
 description: >-
-  Orientation and workflow for developing MSP430 firmware in the msp-fw repo — building/flashing
+  Orientation and workflow for developing MSP430 firmware in the stem repo — building/flashing
   via the Docker toolchain + `just`, generating/regenerating svd2rust PACs, writing and extending
   the Rust `diag` power-on self-test firmware, wiring signals through the `connections.toml`
   registry, and the product's high-level goals (multiple MSP430s as low-power supervisor /
   I/O-extender nodes; FR2433 as the default part, FR2476 where battery/rail monitoring is needed).
-  Use this whenever working anywhere under `msp-fw/` — editing `diag/`, `pac/`, `board/`,
+  Use this whenever working anywhere under `stem/` — editing `diag/`, `pac/`, `board/`,
   `examples/`, the `justfile` or `docker/Dockerfile` — or when asked "how do I build/flash/test
   this", "add a sensor/device test", "regenerate the PAC", "which MCU or PAC do we target",
   "where's the pin map", or "what is this firmware even for". Be pushy about consulting it even for
@@ -14,9 +14,9 @@ description: >-
   pins sourced from connections.toml, build-in-container/flash-on-host) that are easy to violate.
 ---
 
-# Developing firmware in msp-fw
+# Developing firmware in stem
 
-`msp-fw` is the MSP430 firmware for the Thepia/bob-929 hardware. This skill is the map: what the
+`stem` is the MSP430 firmware for the Thepia/bob-929 hardware. This skill is the map: what the
 firmware is *for*, where things live, how to build/flash/test, and the conventions to keep. It
 links out to the repo's own docs rather than duplicating them — **read the linked doc for detail**.
 
@@ -44,7 +44,7 @@ Source docs (the live spec, even though written earlier):
 
 ## Related repos (siblings in the same workspace)
 
-`msp-fw` is the **shared MSP430 firmware**; the products that use it live in sibling repos next to
+`stem` is the **shared MSP430 firmware**; the products that use it live in sibling repos next to
 it. Reference them by path (they're separate repos), not relative link.
 
 - **`bob-929`** — the "Bob" device (stereo MIPI-CSI2 vision + I²C sensors that recognises objects

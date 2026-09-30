@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Peripheral access API for MSP430FR2433 (generated with svd2rust)"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/experientials/msp-fw"
+repository = "https://github.com/experientials/stem"
 categories = ["embedded", "hardware-support", "no-std"]
 keywords = ["msp430", "pac", "svd2rust"]
 

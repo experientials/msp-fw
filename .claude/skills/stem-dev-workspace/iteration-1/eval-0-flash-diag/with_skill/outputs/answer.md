@@ -81,7 +81,7 @@ Deeper flash/mspdebug/USB troubleshooting lives in the **msp430-macos-dev** skil
 (`references/flashing.md`, and the "Known gotchas" table in its `SKILL.md`).
 
 ## Key references
-- `/Volumes/Projects/Talki/msp-fw/TOOLCHAIN.md` — build/flash/CI model
-- `/Volumes/Projects/Talki/msp-fw/diag/README.md` and `diag/DESIGN.md` — what `diag` does, expected output
-- `/Volumes/Projects/Talki/msp-fw/diag.just` and `/Volumes/Projects/Talki/msp-fw/justfile` — the exact recipes
+- `/Volumes/Projects/Talki/stem/TOOLCHAIN.md` — build/flash/CI model
+- `/Volumes/Projects/Talki/stem/diag/README.md` and `diag/DESIGN.md` — what `diag` does, expected output
+- `/Volumes/Projects/Talki/stem/diag.just` and `/Volumes/Projects/Talki/stem/justfile` — the exact recipes
 - `/Volumes/Projects/Talki/bob-929/.claude/skills/msp430-macos-dev/` — host flashing/toolchain setup + gotchas

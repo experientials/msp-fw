@@ -1,4 +1,4 @@
-# msp-fw — working notes (for future sessions)
+# stem — working notes (for future sessions)
 
 Last updated 2026-09-01. State + next steps so we can resume after a context compaction.
 See also: [TOOLCHAIN.md](TOOLCHAIN.md), [RPI-BUILD-FLASH.md](RPI-BUILD-FLASH.md),

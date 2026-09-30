@@ -1,4 +1,4 @@
-# msp-fw toolchain
+# stem toolchain
 
 One **Docker-based toolchain** for all firmware — C (`msp430-gcc`) and Rust
 (`msp430-none-elf`) in a single image. PlatformIO is intentionally not used.

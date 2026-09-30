@@ -1,6 +1,6 @@
 # Raspberry Pi as an MSP430 build + flash node — research & plan
 
-Goal: a Raspberry Pi that can **build and flash** msp-fw — over USB to the LaunchPad (eZ-FET) now,
+Goal: a Raspberry Pi that can **build and flash** stem — over USB to the LaunchPad (eZ-FET) now,
 and over the target's **SBW debug pins** for production later — driven remotely from VS Code.
 
 Companion to [TOOLCHAIN.md](TOOLCHAIN.md) (the build/flash model) and the

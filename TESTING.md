@@ -1,4 +1,4 @@
-# msp-fw — test scenarios to automate
+# stem — test scenarios to automate
 
 The catalog of what we *should* cover with automated tests, and at which layer each belongs. This
 is the target, not a status report: almost nothing here is wired up yet (there are no `#[test]`s in

@@ -1,4 +1,4 @@
-# msp-fw
+# stem
 
 MSP430 firmware for the Thepia **bob-929 / ziloo** hardware — a low-power **supervisor + I/O
 extender** that monitors rails/signals while the main board sleeps and exposes its GPIO to a host

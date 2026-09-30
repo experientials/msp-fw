@@ -74,11 +74,11 @@ has real firmware consequences today:
 
 - `bob-929/docs/MCU_SELECTION.md` — feature comparison, cost/availability tracking (last
   checked 2026-08-29), supervisor notes, and the port caveat. Primary decision doc.
-- `msp-fw/.claude/skills/msp-fw-dev/SKILL.md` — high-level goals + chip-portability conventions
+- `stem/.claude/skills/msp-fw-dev/SKILL.md` — high-level goals + chip-portability conventions
   (no HAL, PAC-direct, planned board crate).
-- `msp-fw/diag/Cargo.toml`, `msp-fw/diag/memory.x` — evidence the firmware is 2476-hardcoded today.
-- `msp-fw/board/connections.toml` — the FR2476 pin map that would need re-verification for 2433.
-- `msp-fw/pac/msp430fr2433/`, `msp-fw/pac/msp430fr2476/` — vendored PACs for both targets.
+- `stem/diag/Cargo.toml`, `stem/diag/memory.x` — evidence the firmware is 2476-hardcoded today.
+- `stem/board/connections.toml` — the FR2476 pin map that would need re-verification for 2433.
+- `stem/pac/msp430fr2433/`, `stem/pac/msp430fr2476/` — vendored PACs for both targets.
 - Datasheets/app notes in `bob-929/docs/`: `msp430fr2433.pdf`, `msp430fr2476.pdf`,
   `slaa890a.pdf` (ADC window comparator, no-CPU monitoring), `sszt426.pdf` (2476
   compute-through-power-loss).

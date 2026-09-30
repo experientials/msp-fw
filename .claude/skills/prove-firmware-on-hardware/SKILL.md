@@ -10,7 +10,7 @@ description: >-
   debug-macro primitives, the port→build→flash→PROVE loop, and the definition of "proven working".
   Triggers on: "prove it works on hardware", "validate without console", "boot confirmation",
   "the console is silent", "is the firmware actually running", "port diag/prod to <part>", "debug
-  macros / trace flags", or any MSP430 bring-up where compile ≠ works. Complements `msp-fw-dev`
+  macros / trace flags", or any MSP430 bring-up where compile ≠ works. Complements `stem-dev`
   (build/flash mechanics) and `thepia-hwd` (driving the board).
 ---
 
@@ -149,7 +149,7 @@ missing, `report` it (don't drive mspdebug directly — that crosses the "thepia
 line). Until then, the I²C-slave channel + console are available; JTAG-read is the gap to close.
 
 ## Reference docs
-Datasheets/user-guides live in `bob-929/Hardware/datasheets/` (canonical) + `msp-fw/datasheets/`
+Datasheets/user-guides live in `bob-929/Hardware/datasheets/` (canonical) + `stem/datasheets/`
 (firmware-local) — see **`bob-929/Hardware/datasheets/INDEX.md`** for the index + hard-won facts.
 **Save resources; index them; reference them here.** A missing board user-guide (SLAU680) cost a full
 silent-console detour below.
@@ -168,5 +168,5 @@ silent-console detour below.
     `diag/FR2355-SCOPE.md`.
 
 ## Related
-`msp-fw-dev` (build/flash mechanics, `connections.toml`), `thepia-hwd` (driving boards, verify-by-
+`stem-dev` (build/flash mechanics, `connections.toml`), `thepia-hwd` (driving boards, verify-by-
 stamp), STEM-DIRECTION.md (roles, field-update integrity), `high-bar-mandate` (prove, don't assert).

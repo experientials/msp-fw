@@ -1,7 +1,7 @@
 # Adding a VL53L0X diagnostic test to the `diag` firmware
 
 Guidance only — where the code goes and the conventions to follow. All paths are in
-`/Volumes/Projects/Talki/msp-fw/`.
+`/Volumes/Projects/Talki/stem/`.
 
 ## The big picture
 

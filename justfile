@@ -1,4 +1,4 @@
-# msp-fw command runner.
+# stem command runner.
 #
 # Build recipes run inside the toolchain container. On your Mac they shell into
 # Docker; in CI (already running inside the image) they build natively — the

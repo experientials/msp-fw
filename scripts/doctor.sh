@@ -19,7 +19,7 @@ if printf '%s' "$sys_ver" | grep -q "$tc"; then
   echo "  ✗ system default rustc IS the pinned nightly — segregation LEAKED (did something run 'rustup default $tc'?)"
   fail=1
 else
-  echo "  ✓ system default rustc is not the msp-fw nightly"
+  echo "  ✓ system default rustc is not the stem nightly"
 fi
 case "$sys_rustc" in
   */Cellar/rust/*|/usr/local/bin/rustc)

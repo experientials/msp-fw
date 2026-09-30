@@ -6,7 +6,7 @@
 # Env: MSP430_GCC_REPO (owner/repo), MSP430_GCC_TAG (release tag), MSP430_GCC_DEST (extract parent).
 set -euo pipefail
 
-REPO="${MSP430_GCC_REPO:-experientials/msp-fw}"
+REPO="${MSP430_GCC_REPO:-experientials/stem}"
 TAG="${MSP430_GCC_TAG:-msp430-gcc-9.3.1}"
 DEST="${MSP430_GCC_DEST:-/opt}"
 

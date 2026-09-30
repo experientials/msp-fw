@@ -1,4 +1,4 @@
-# msp-fw backlog — tracked tasks & bugfixes
+# stem backlog — tracked tasks & bugfixes
 
 Durable list so findings don't get lost in chat. Each item: **severity · area · evidence · fix ·
 status**. Check the box when done. Keep newest context at the top of each item.
@@ -54,7 +54,7 @@ status**. Check the box when done. Keep newest context at the top of each item.
 
 ## Convergence / tech-debt — from the diag/prod → bsp work (STEM-DIRECTION.md)
 
-- [ ] **CONV-1 · prod `clock.rs`/`uart.rs` → `bsp::board`** — *medium · DESIGN-GATED (not short-term)* · [GitHub #5](https://github.com/experientials/msp-fw/issues/5)
+- [ ] **CONV-1 · prod `clock.rs`/`uart.rs` → `bsp::board`** — *medium · DESIGN-GATED (not short-term)* · [GitHub #5](https://github.com/experientials/stem/issues/5)
   - The hal/i2c fork is eliminated (both use `bsp`), but prod still has its own family-generic
     `clock.rs`/`uart.rs`. Folding them into `bsp::board` is **not just effort** — it embeds a design
     decision: prod uses **runtime model-detect + pin-map** (`model.rs`, one image per family) vs
@@ -65,7 +65,7 @@ status**. Check the box when done. Keep newest context at the top of each item.
     not the hardcoded `msp430fr2355`. Not build-exercised (still `mod`-undeclared/dormant).
   - Still open: making it *truly* chip-agnostic — its snapshot fields assume the fr2355 board
     (UCA1 ctlw0, p4sel0). Finish when it's actually wired in.
-- [ ] **CONV-3 · Stem-I²C slave in `bsp::board`** — *feature (prod milestone)* · [GitHub #2](https://github.com/experientials/msp-fw/issues/2)
+- [ ] **CONV-3 · Stem-I²C slave in `bsp::board`** — *feature (prod milestone)* · [GitHub #2](https://github.com/experientials/stem/issues/2)
   - Add the slave/target uplink (`stem_i2c`) role; needs a non-embedded-hal target abstraction.
 - [x] **CONV-6 · fr24xx (FR2433) I²C-SLAVE / regmap surface — the node's real role** — *DONE (boot-
   verified) 2026-09-30; physical GPIO/ADC backing + master-reads-slave proof still open*
@@ -132,7 +132,7 @@ status**. Check the box when done. Keep newest context at the top of each item.
     real fr24xx role, GitHub #3). Next: tidy to print-once + commit.
   - Prereq-ish for CONV-4 (a useful fr2433 diag/dev build wants debug output).
 
-- [ ] **CONV-4 · fr2433 diag role** — *design (deferred)* · [GitHub #3](https://github.com/experientials/msp-fw/issues/3)
+- [ ] **CONV-4 · fr2433 diag role** — *design (deferred)* · [GitHub #3](https://github.com/experientials/stem/issues/3)
   - FR2433 is single-I²C **slave-only** — diag's sensor-scan POST doesn't apply. Design a diag role
     (exercise the slave/expander + GPIO) when prod's fr2433 node duties exist (today it's a 110 B
     idle scaffold).
@@ -144,7 +144,7 @@ status**. Check the box when done. Keep newest context at the top of each item.
 - [ ] **VER-1 · diag on FR2476 (post-refactor)** — build-verified only; run single-adapter on an
   FR2476 to confirm (same shared code, UCA0 board module).
 - [ ] **VER-2 · prod on hardware (any family)** — never run (scaffold: boots/watchdog/idle). Run when
-  node duties are implemented. · [GitHub #4](https://github.com/experientials/msp-fw/issues/4)
+  node duties are implemented. · [GitHub #4](https://github.com/experientials/stem/issues/4)
 - [x] **diag on FR2355 (post-refactor)** — DONE 2026-09-30 (build hd2355): CONFIRMED RUNNING + POST;
   register values match source exactly. See `diag/proofs/console-fr2355.log`.
 

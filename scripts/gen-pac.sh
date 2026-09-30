@@ -15,7 +15,7 @@ SVD2RUST_VERSION=v0.37.1
 MSP430_SVD_REPO=https://github.com/pftbest/msp430_svd
 DEVICES="${*:-msp430fr2433 msp430fr2476}"
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)   # msp-fw/
+ROOT=$(cd "$(dirname "$0")/.." && pwd)   # stem/
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 

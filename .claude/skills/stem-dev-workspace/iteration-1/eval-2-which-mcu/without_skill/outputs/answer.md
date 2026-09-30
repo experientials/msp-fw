@@ -18,7 +18,7 @@ Why FR2433 for the batch you're about to order:
   threshold *without clocking the CPU*. That covers "poll rails, drive SD (SPI) + I/O expander (I²C),
   wake on trigger."
 - **Firmware fits with margin.** The firmware budget is **8 KB image / 1 KB RAM**
-  (`msp-fw/FIRMWARE-API.md`); FR2433's 16 KB/4 KB clears that comfortably. (FR2422, the earlier
+  (`stem/FIRMWARE-API.md`); FR2433's 16 KB/4 KB clears that comfortably. (FR2422, the earlier
   "planned" part, has only 8 KB FRAM / 2 KB SRAM — too tight, and weak on LCSC. Don't pick it.)
 
 Pick **FR2476** instead only if the supervisor must do **true analog comparison at minimum idle
@@ -89,10 +89,10 @@ part," so decide them now, not after the boards arrive:
 
 - `bob-929/docs/MCU_SELECTION.md` — the decision doc: feature comparison, supply/price, port caveat.
 - `bob-929/docs/DEV_BOARDS.md` — bench inventory (2× FR2476 + 1 FR2433 LaunchPads on hand).
-- `msp-fw/pac/README.md` — FR2433 = "production default node", FR2476 = "battery-monitor variant".
-- `msp-fw/FIRMWARE-API.md` — 8 KB image / 1 KB RAM budget; soft-I²C fallback for single-I²C chips.
-- `msp-fw/HARDWARE.md` + `msp-fw/board/connections.toml` — dual-bus (Stem + Sensor) intent, pin map.
-- `msp-fw/NOTES.md` — open items: verify FR2433 I²C pins; wrong package field; diag not yet HW-tested.
-- `msp-fw/TOOLCHAIN.md` — per-chip build via cargo feature; interrupt/vector-table maturity.
+- `stem/pac/README.md` — FR2433 = "production default node", FR2476 = "battery-monitor variant".
+- `stem/FIRMWARE-API.md` — 8 KB image / 1 KB RAM budget; soft-I²C fallback for single-I²C chips.
+- `stem/HARDWARE.md` + `stem/board/connections.toml` — dual-bus (Stem + Sensor) intent, pin map.
+- `stem/NOTES.md` — open items: verify FR2433 I²C pins; wrong package field; diag not yet HW-tested.
+- `stem/TOOLCHAIN.md` — per-chip build via cargo feature; interrupt/vector-table maturity.
 - Datasheets in `bob-929/docs/`: `msp430fr2433.pdf`, `msp430fr2476.pdf`, `msp430fr2422.pdf`,
   `slaa890a.pdf` (ADC window comparator), `sszt426.pdf` (FR2476 compute-through-power-loss).
