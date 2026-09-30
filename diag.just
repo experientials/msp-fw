@@ -43,7 +43,8 @@ build target="fr2476" mode="auto":
     case "{{target}}" in
         fr2476) RAM_BUDGET=8192 ;;  # reserve ≥1 KB for stack via STACK_FLOOR
         fr2355) RAM_BUDGET=4096 ;;
-        *) echo "unknown target '{{target}}' — use fr2476 or fr2355" >&2; exit 1 ;;
+        fr2155) RAM_BUDGET=4096 ;;  # rides the fr2355 LaunchPad; FR2155 = 32 KB / 4 KB
+        *) echo "unknown target '{{target}}' — use fr2476 | fr2355 | fr2155" >&2; exit 1 ;;
     esac
     FRAM_BUDGET=32768; STACK_FLOOR=1024
     feats="--no-default-features --features {{target}}"

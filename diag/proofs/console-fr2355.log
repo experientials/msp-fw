@@ -6,13 +6,14 @@ separate from the stable assertion body so a re-proof of unchanged behaviour dif
 
 ## Run header (volatile — regenerate on re-proof)
 - feature .......... FR2355 diag console bring-up (backchannel UART)
-- as-run build ..... fr2355/2026.dev-fr2355run1
-- observed ......... 2026-09-29
+- as-run build ..... fr2355/2026.dev-hd2355  (HEAD, post bsp-extraction + prod-convergence/union-i2c)
+- observed ......... 2026-09-30  (re-proof at HEAD, single-adapter)
 - target part ...... MSP430FR2355  (JTAG device-id 0x01ff)
 - board / serial ... FR2355 LaunchPad, eZ-FET serial 8E57A36E1F000000  (@toy-b)
 - console endpoint . /dev/cu.usbmodem235103  (9600 8N1)
 - channels used .... flash byte-verify (mspdebug) + console verify-by-stamp + console log capture
-- tool ............. `thepia hwd msp flash ... --verify-stamp fr2355run1`
+- tool ............. `thepia hwd msp flash ... --verify-stamp hd2355`
+- prior run ........ fr2355/2026.dev-fr2355run1 (2026-09-29, pre-refactor) — same result
 
 ## Assertions (stable — expected vs observed)
 | # | assertion | expected | observed | verdict |
@@ -47,10 +48,12 @@ fault. The assertion is that the Leaf-I²C master *runs*; device presence is out
     summary: 0 passed, 2 FAILED, 2 skipped   (expected: no I²C devices attached)
 
 ## Status / re-proof trigger
-- **as-run build predates the bus-accessor commit** (`board::leaf_i2c`/`console_uart_*`), which is a
-  **behaviour-preserving** refactor for the console (same eUSCI_A1, same P4.2/3 pins, same clock).
-  So the observed behaviour applies to HEAD, but a **single-adapter reflash of HEAD** is the pending
-  re-proof to make this artifact match the current tree exactly. Re-proof is blocked while two eZ-FET
-  adapters are attached (multi-adapter JTAG guard) — do it with only the FR2355 connected.
+- **RE-PROOFED AT HEAD 2026-09-30 (single-adapter).** The pending trigger is satisfied: the current
+  tree — after the `bsp` extraction (board/hal/i2c moved to crates/bsp) and the prod-convergence
+  union `i2c` — runs on real FR2355 silicon. Two extra confirmations this run:
+  - **board-aware UART dump** (`regs.rs` → `board::console_uart_regs`) prints `[console UART]
+    UCAx CTLW0=0080 BRW=0006 MCTLW=2081` — reads **UCA1** correctly (pre-fix it dumped UCA0).
+  - **union `i2c`** (`bsp::i2c`, diag `set_brw` + prod `bus_levels`/`read_reg_pumped`/probe) — the
+    Leaf master inits (`UCB0CTLW0=0F80`, 100 kHz) and the scan executes; no regression vs the prior run.
 - Not yet proven here (future): the SBW boot-record channel (`bootrec.rs` is dormant/unwired) and the
   Tier-2 SoM-mastered I²C/UART acceptance (full bench). This log is Tier-1 (dev-board) console proof.

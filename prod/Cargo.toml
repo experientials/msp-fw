@@ -13,11 +13,12 @@ default = ["fr247x", "console", "mode-passive", "mode-sensing"]
 # DUAL-I²C families (2× eUSCI_B → Stem SLAVE + local sensor MASTER) all enable the internal `_dual`
 # marker + select their PAC; they SHARE the code via the `pac` alias in main.rs. Adding one is just a
 # feature line + optional PAC dep + a `pac` alias arm + the model/prod.just entries.
-fr247x = ["dep:msp430fr2476", "_dual"] # FR2476/FR2475 — primary dev target (LaunchPads on hand)
-fr215x = ["dep:msp430fr2155", "_dual"] # FR2155 — production dual-I²C baseline (32 KB / 4 KB)
-fr235x = ["dep:msp430fr2355", "_dual"] # FR2355 — dev LaunchPad (MSP-EXP430FR2355), superset of FR2155
+# The family feature forwards to bsp's PAC feature (bsp owns the PAC alias + the shared board/hal/i2c).
+fr247x = ["bsp/fr2476", "_dual"] # FR2476/FR2475 — primary dev target (LaunchPads on hand)
+fr215x = ["bsp/fr2155", "_dual"] # FR2155 — production dual-I²C baseline (32 KB / 4 KB)
+fr235x = ["bsp/fr2355", "_dual"] # FR2355 — dev LaunchPad (MSP-EXP430FR2355), superset of FR2155
 # FR24xx (FR2433) — SINGLE-I²C slave-only expander. The cheap, small, well-stocked production node.
-fr24xx = ["dep:msp430fr2433"]
+fr24xx = ["bsp/fr2433"]
 # Internal marker: "this is a dual-I²C family" — gates the shared dual-I²C code. Not selected directly.
 _dual = []
 # `console` — dev-only UART logging (banner + enumerate report + debug-register dump + s/r/d). OFF =
@@ -37,18 +38,13 @@ mode-sensing = []
 msp430 = "0.4"
 msp430-rt = "0.4"
 panic-msp430 = "0.4"
-# Family PACs are optional; the active family feature pulls exactly one in (see [features]).
-msp430fr2476 = { path = "../pac/msp430fr2476", optional = true }
-msp430fr2155 = { path = "../pac/msp430fr2155", optional = true }
-msp430fr2355 = { path = "../pac/msp430fr2355", optional = true }
-msp430fr2433 = { path = "../pac/msp430fr2433", optional = true }
+# The shared low-level layer: chip-select PAC alias, board semantic map, hal I2c seam, Leaf-I2C
+# driver. prod re-exports bsp::{pac,hal,i2c} (main.rs); the family feature forwards to bsp (above).
+bsp = { path = "../crates/bsp" }
 sched = { path = "../crates/sched" }
 # Shared per-device drivers (one module per sensor, standard Device convention) — used by both diag
-# and prod via the embedded-hal I2c seam. Family-agnostic; the FR247x bus impl is prod/src/hal.rs.
+# and prod via the embedded-hal I2c seam (bsp::hal).
 devices = { path = "../crates/devices" }
-# embedded-hal 1.0 — trait definitions only (no code); an unused impl is stripped by LTO, so it
-# costs ~0 ROM. The portability seam for the shared crates/devices drivers.
-embedded-hal = "1.0"
 
 # opt-level "s" + LTO: size wins over speed (the FRAM budget is the point). The gate
 # (`just prod build`) fails the build if the footprint exceeds the active family's budget.

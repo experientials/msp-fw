@@ -7,13 +7,24 @@ description = "Board support package: chip-select PAC alias, the board semantic 
 [dependencies]
 msp430 = "0.4"
 # Chip is picked by a mutually-exclusive feature; the consuming crate (diag/prod) forwards it. Each
-# PAC is optional so a build links exactly one. `bsp::pac` re-exports the selected one.
+# PAC is optional so a build links exactly one. `bsp::pac` re-exports the selected one. The family
+# set matches prod (STEM-DIRECTION.md: diag and prod share ONE family/board axis).
 msp430fr2476 = { path = "../../pac/msp430fr2476", optional = true }
 msp430fr2355 = { path = "../../pac/msp430fr2355", optional = true }
+msp430fr2155 = { path = "../../pac/msp430fr2155", optional = true }
+msp430fr2433 = { path = "../../pac/msp430fr2433", optional = true }
 # embedded-hal 1.0 — the I2c trait the shared `crates/devices` drivers talk to (see `hal`).
 embedded-hal = "1.0"
 
 [features]
 # No default: bsp is never built standalone — the consumer selects the chip (compile_error otherwise).
-fr2476 = ["dep:msp430fr2476"]
-fr2355 = ["dep:msp430fr2355"]
+# One feature PER PAC; the consumer's family feature forwards to exactly one (e.g. prod fr247x ->
+# bsp/fr2476, fr215x -> bsp/fr2155, fr235x -> bsp/fr2355, fr24xx -> bsp/fr2433).
+# `_leaf` = the part has the dual-I²C **Leaf master** bus (a `e_usci_b0`-named UCB0). The dual families
+# enable it; FR2433 (single-I²C, slave-only, PAC field `usci_b0`) does NOT — so `hal`/`i2c`/`leaf_i2c`
+# are gated off there. Mirrors prod's `_dual` marker.
+fr2476 = ["dep:msp430fr2476", "_leaf"]
+fr2355 = ["dep:msp430fr2355", "_leaf"]
+fr2155 = ["dep:msp430fr2155", "_leaf"]
+fr2433 = ["dep:msp430fr2433"]
+_leaf = []

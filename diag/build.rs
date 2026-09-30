@@ -51,8 +51,10 @@ fn main() {
 /// one tree — no file swapping.
 fn emit_memory_x() {
     use std::io::Write;
-    let ram_len = if std::env::var("CARGO_FEATURE_FR2355").is_ok() {
-        "0x1000" // FR2355: 4 KB SRAM (0x2000-0x2FFF)
+    let ram_len = if std::env::var("CARGO_FEATURE_FR2355").is_ok()
+        || std::env::var("CARGO_FEATURE_FR2155").is_ok()
+    {
+        "0x1000" // FR2355 / FR2155: 4 KB SRAM (0x2000-0x2FFF)
     } else {
         "0x2000" // FR2476: 8 KB SRAM (0x2000-0x3FFF)
     };
@@ -91,6 +93,9 @@ fn target() -> Option<String> {
     }
     if std::env::var("CARGO_FEATURE_FR2355").is_ok() {
         return Some("fr2355".into());
+    }
+    if std::env::var("CARGO_FEATURE_FR2155").is_ok() {
+        return Some("fr2155".into());
     }
     if std::env::var("CARGO_FEATURE_FR2476").is_ok() {
         return Some("fr2476".into());

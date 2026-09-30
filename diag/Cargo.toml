@@ -26,6 +26,8 @@ devices = { path = "../crates/devices" }
 default = ["fr2476"]
 fr2476 = ["bsp/fr2476"]
 fr2355 = ["bsp/fr2355"]
+# fr2155 rides the FR2355 LaunchPad (same board module); 32 KB FRAM / 4 KB RAM like fr2355.
+fr2155 = ["bsp/fr2155"]
 
 [profile.release]
 opt-level = "s"

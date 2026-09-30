@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-hal",
  "msp430",
+ "msp430fr2155",
  "msp430fr2355",
  "msp430fr2476",
 ]
@@ -73,6 +74,13 @@ dependencies = [
  "rand",
  "rand_xoshiro",
  "syn",
+]
+
+[[package]]
+name = "msp430fr2155"
+version = "0.1.0"
+dependencies = [
+ "vcell",
 ]
 
 [[package]]

@@ -39,18 +39,14 @@ compile_error!("prod: enable at least one mode — `--features mode-passive` and
 #[cfg(all(feature = "fr24xx", feature = "mode-sensing"))]
 compile_error!("prod: `mode-sensing` requires a dual-I²C family — FR2433 (fr24xx) is Passive-only");
 
-// PAC alias: the dual-I²C families share ALL the code (`_dual`); they differ only in which PAC is
-// selected here. Every module says `use crate::pac::Peripherals`, so adding a dual family is one arm.
-#[cfg(feature = "fr247x")]
-pub(crate) use msp430fr2476 as pac; // FR2476/FR2475
-#[cfg(feature = "fr215x")]
-pub(crate) use msp430fr2155 as pac; // FR2155 (production)
-#[cfg(feature = "fr235x")]
-pub(crate) use msp430fr2355 as pac; // FR2355 (dev LaunchPad)
+// The chip-select PAC alias + the shared board/hal/i2c layer live in `bsp` (STEM-DIRECTION.md: diag
+// and prod share ONE family/board axis). Re-export `pac` so every module keeps
+// `use crate::pac::Peripherals`; the family feature forwards to exactly one bsp PAC. `hal`/`i2c` (the
+// dual-I²C Leaf bus) are re-exported for the dual families — the SAME shared driver diag uses.
+pub(crate) use bsp::pac;
+use crate::pac::Peripherals;
 #[cfg(feature = "_dual")]
-use crate::pac::Peripherals; // dual-I²C (2× eUSCI_B)
-#[cfg(feature = "fr24xx")]
-use msp430fr2433::Peripherals; // FR2433 — single-I²C slave-only
+pub(crate) use bsp::{hal, i2c};
 
 mod model; // Runtime MSP430 model detection + pin mapping (one image per compatible family).
 mod regmap; // I²C-slave register-map contract (PCA9698 emulation + Thepia extensions). See regmap.rs.
@@ -61,10 +57,6 @@ mod regmap; // I²C-slave register-map contract (PCA9698 emulation + Thepia exte
 // live in `crates/devices`; only this glue is chip-specific.
 #[cfg(feature = "_dual")]
 mod clock;
-#[cfg(feature = "_dual")]
-mod hal;
-#[cfg(feature = "_dual")]
-mod i2c;
 #[cfg(feature = "_dual")]
 mod enumerate;
 #[cfg(feature = "_dual")]

@@ -22,9 +22,11 @@ mod fr2476_launchpad;
 #[cfg(feature = "fr2476")]
 pub use fr2476_launchpad::*;
 
-#[cfg(feature = "fr2355")]
+// fr2155 rides the FR2355 LaunchPad (its register superset) — same board wiring, same module. prod
+// validates the FR2155 production part on FR2355 hardware; diag does likewise.
+#[cfg(any(feature = "fr2355", feature = "fr2155"))]
 mod fr2355_launchpad;
-#[cfg(feature = "fr2355")]
+#[cfg(any(feature = "fr2355", feature = "fr2155"))]
 pub use fr2355_launchpad::*;
 
 // ── Leaf I²C (semantic role: sensors / LCD / non-MCU nodes; the MCU is master) ─────────────────
@@ -32,22 +34,29 @@ pub use fr2355_launchpad::*;
 // modules Leaf = UCB0 on P1.2/P1.3, so the binding + pin route are chip-common and live here rather
 // than per-module; move them into a `<chip>_<module>` file if a future board wires Leaf to a
 // different eUSCI_B. The Stem-I²C (slave uplink) and SPI roles land here later the same way.
-use crate::pac::Peripherals;
+// Gated on `_leaf`: only dual-I²C families have the Leaf **master** bus (`hal`/`i2c`). FR2433
+// (single-I²C slave-only) has none, so this whole section is absent there.
+#[cfg(feature = "_leaf")]
+mod leaf {
+    use crate::pac::Peripherals;
 
-const P1_LEAF_I2C_PINS: u8 = 0x0C; // BIT2|BIT3 -> UCB0 SDA/SCL (P1.2/P1.3)
+    const P1_LEAF_I2C_PINS: u8 = 0x0C; // BIT2|BIT3 -> UCB0 SDA/SCL (P1.2/P1.3)
 
-/// Route the Leaf-I²C pins (P1.2/P1.3 → UCB0). SEL1:SEL0 = 01 selects the primary module; clear
-/// SEL1 explicitly so we never depend on reset state selecting the wrong function.
-pub fn route_leaf_i2c_pins(p: &Peripherals) {
-    p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_LEAF_I2C_PINS) }); // SEL1=0
-    p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_LEAF_I2C_PINS) }); // SEL0=1
+    /// Route the Leaf-I²C pins (P1.2/P1.3 → UCB0). SEL1:SEL0 = 01 selects the primary module; clear
+    /// SEL1 explicitly so we never depend on reset state selecting the wrong function.
+    pub fn route_leaf_i2c_pins(p: &Peripherals) {
+        p.p1.p1sel1().modify(|r, w| unsafe { w.bits(r.bits() & !P1_LEAF_I2C_PINS) }); // SEL1=0
+        p.p1.p1sel0().modify(|r, w| unsafe { w.bits(r.bits() | P1_LEAF_I2C_PINS) }); // SEL0=1
+    }
+
+    /// The Leaf-I²C bus as an `embedded-hal` `I2c` master — the acquisition point drivers use, so
+    /// they name the role, never the raw `e_usci_b0`. Backed by `hal::EusciI2c` → `crate::i2c` (UCB0).
+    /// `allow(dead_code)`: retained seam for `crates/devices` drivers + prod (LTO-stripped, ~0 ROM);
+    /// the diag POST currently drives `crate::i2c` directly.
+    #[allow(dead_code)]
+    pub fn leaf_i2c(p: &Peripherals) -> crate::hal::EusciI2c<'_> {
+        crate::hal::EusciI2c::new(p)
+    }
 }
-
-/// The Leaf-I²C bus as an `embedded-hal` `I2c` master — the acquisition point drivers use, so they
-/// name the role, never the raw `e_usci_b0`. Backed by `hal::EusciI2c` → `crate::i2c` (UCB0).
-/// `allow(dead_code)`: retained seam for `crates/devices` drivers + prod (LTO-stripped, ~0 ROM),
-/// same rationale as `hal.rs`; the diag POST currently drives `crate::i2c` directly.
-#[allow(dead_code)]
-pub fn leaf_i2c(p: &Peripherals) -> crate::hal::EusciI2c<'_> {
-    crate::hal::EusciI2c::new(p)
-}
+#[cfg(feature = "_leaf")]
+pub use leaf::*;

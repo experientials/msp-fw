@@ -17,12 +17,25 @@
 pub use msp430fr2476 as pac;
 #[cfg(feature = "fr2355")]
 pub use msp430fr2355 as pac;
+#[cfg(feature = "fr2155")]
+pub use msp430fr2155 as pac;
+#[cfg(feature = "fr2433")]
+pub use msp430fr2433 as pac;
 
-#[cfg(all(feature = "fr2476", feature = "fr2355"))]
-compile_error!("features fr2476 and fr2355 are mutually exclusive — select exactly one chip");
-#[cfg(not(any(feature = "fr2476", feature = "fr2355")))]
-compile_error!("bsp: select a chip feature (fr2476 or fr2355) via the consuming crate (diag/prod)");
+// Exactly one chip feature must be on. "None" is caught here; selecting two makes `pac` a duplicate
+// import (a clear "defined multiple times" error), so no verbose pairwise guard is needed.
+#[cfg(not(any(
+    feature = "fr2476",
+    feature = "fr2355",
+    feature = "fr2155",
+    feature = "fr2433"
+)))]
+compile_error!("bsp: select ONE chip feature (fr2476|fr2355|fr2155|fr2433) via the consumer (diag/prod)");
 
 pub mod board;
+// The Leaf-I²C master driver + its embedded-hal seam exist only on dual-I²C families (`_leaf`);
+// FR2433 (single-I²C slave-only, PAC field `usci_b0`) has no Leaf master bus, so these are absent there.
+#[cfg(feature = "_leaf")]
 pub mod hal;
+#[cfg(feature = "_leaf")]
 pub mod i2c;
